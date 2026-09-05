@@ -1,0 +1,38 @@
+name: 24/7 Financial Alert Engine
+
+# This controls WHEN the script runs
+on:
+  schedule:
+    # This runs at 2:00 AM UTC every day. You can adjust this to your timezone.
+    - cron: '0 2 * * *'
+  
+  # This allows you to click a "Run Workflow" button manually in GitHub to test it!
+  workflow_dispatch: 
+
+jobs:
+  run-alerts:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install Dependencies
+        run: |
+          pip install pandas supabase google-generativeai
+          
+      - name: Wake Up & Run Alert Engine
+        env:
+          # We pass GitHub Secrets into the Python script securely
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: |
+          python alert_engine.py

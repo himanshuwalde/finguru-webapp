@@ -1,0 +1,104 @@
+import os
+import pandas as pd
+from datetime import datetime
+import google.generativeai as genai
+from utils.email_engine import send_financial_alert
+
+# Attempt to load Gemini Key (Handles both Render OS env and Streamlit Secrets)
+try:
+    import streamlit as st
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
+except ImportError:
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+def generate_anomaly_email_content(user_name, account_name, amount, description, date_str, is_temporal, is_behavioral, category_mean):
+    """Uses Gemini to draft a high-urgency fraud alert."""
+    valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    target_model = next((m for m in valid_models if 'flash' in m), "gemini-pro")
+    model = genai.GenerativeModel(target_model)
+    
+    reasons = []
+    if is_temporal:
+        reasons.append("It occurred late at night (between Midnight and 5:00 AM).")
+    if is_behavioral:
+        reasons.append(f"It is significantly higher than their usual average (₹{category_mean:,.0f}) for this category.")
+        
+    prompt = f"""
+    You are FinGuru's Security AI. You just detected a suspicious transaction for {user_name} on their "{account_name}" account.
+    
+    Transaction Details:
+    - Merchant: {description}
+    - Amount: ₹{amount:,.2f}
+    - Time: {date_str}
+    - Why flagged: {' '.join(reasons)}
+    
+    Task: Draft a short, urgent HTML email body (no <head> or <body> tags, just inner HTML).
+    Style it beautifully using inline CSS. Make it look like a professional bank fraud alert. 
+    Use a soft red/warning color scheme for highlights.
+    End with two clear, actionable steps:
+    1. If it was them: Tell them they can safely ignore this email.
+    2. If it wasn't them: Advise them to open their bank app and freeze their card immediately.
+    """
+    response = model.generate_content(prompt)
+    return response.text
+
+def check_and_alert_anomaly(supabase, user_id, user_email, user_name, amount, category, description, transaction_time_iso, account_name="Primary Account"):
+    """Evaluates a single new transaction and triggers an instant email if suspicious."""
+    try:
+        # --- 1. TEMPORAL CHECK ---
+        txn_time = pd.to_datetime(transaction_time_iso, utc=True).tz_convert('Asia/Kolkata')
+        is_temporal_anomaly = 0 <= txn_time.hour <= 5
+
+        # --- 2. BEHAVIORAL CHECK (Z-Score) ---
+        is_behavioral_anomaly = False
+        category_mean = 0
+        
+        if amount > 500:
+            past_txns = supabase.table("transactions").select("amount").eq("user_id", user_id).eq("category", category).eq("type", "Expense").execute()
+            
+            if past_txns.data and len(past_txns.data) > 2:
+                df = pd.DataFrame(past_txns.data)
+                df['amount'] = pd.to_numeric(df['amount'])
+                
+                category_mean = df['amount'].mean()
+                category_std = df['amount'].std()
+                if pd.isna(category_std): category_std = 0
+                
+                if amount > (category_mean + (2 * category_std)):
+                    is_behavioral_anomaly = True
+
+        # --- 3. TRIGGER THE EMAIL ---
+        if is_temporal_anomaly or is_behavioral_anomaly:
+            subject = f"🚨 FRAUD ALERT: Suspicious Transaction on {account_name}"
+            
+            # Ask Gemini to write the specific body
+            html_content = generate_anomaly_email_content(
+                user_name, account_name, amount, description, 
+                txn_time.strftime("%b %d, %Y at %I:%M %p"), 
+                is_temporal_anomaly, is_behavioral_anomaly, category_mean
+            )
+            
+            # Wrap it in your FinGuru master template (Red Header version)
+            full_html = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;">
+                <div style="background: linear-gradient(45deg, #e74c3c, #c0392b); padding: 20px; text-align: center; color: white;">
+                    <h2 style="margin: 0;">FinGuru Security Alert</h2>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">Account: {account_name}</p>
+                </div>
+                <div style="padding: 30px; background-color: #ffffff; color: #333333;">
+                    {html_content}
+                </div>
+                <div style="background-color: #f9fafb; padding: 15px; text-align: center; font-size: 12px; color: #6b7280;">
+                    Automated Security Guardrail from your FinGuru System.<br>
+                </div>
+            </div>
+            """
+            
+            send_financial_alert(user_email, subject, full_html)
+            print(f"🚨 Anomaly alert fired for {user_email}")
+            
+    except Exception as e:
+        print(f"Failed to run anomaly check: {e}")

@@ -1,0 +1,43 @@
+# Virtual environment
+env/
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model files (large files - consider Git LFS)
+*.joblib
+*.pkl
+
+# Data files (optional - uncomment if you don't want to track data)
+# *.csv
+# *.json
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Logs
+*.log
+
+# Distribution / Packaging
+dist/
+build/
+*.egg-info/

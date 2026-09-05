@@ -1,0 +1,8 @@
+[server]
+# Prevents the app from being embedded in malicious <iframe> windows (Anti-Clickjacking)
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+# Ensures the browser doesn't try to "guess" content types (Anti-MIME Sniffing)
+gatherUsageStats = false
