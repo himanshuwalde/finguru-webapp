@@ -2,6 +2,8 @@
 # Prevents the app from being embedded in malicious <iframe> windows (Anti-Clickjacking)
 enableCORS = false
 enableXsrfProtection = true
+headless = true
+port = $PORT
 
 [browser]
 # Ensures the browser doesn't try to "guess" content types (Anti-MIME Sniffing)

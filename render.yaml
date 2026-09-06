@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: finguru-streamlit
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.9
