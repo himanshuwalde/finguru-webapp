@@ -5,6 +5,7 @@ import calendar
 from supabase import create_client, Client
 import google.generativeai as genai
 from utils.email_engine import send_financial_alert
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
 # --- INITIALIZE CONNECTIONS ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -12,13 +13,22 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-genai.configure(api_key=GEMINI_API_KEY)
+
+# Initialize Gemini client lazily (only when needed)
+_genai_client = None
+
+def _get_genai_client():
+    global _genai_client
+    if _genai_client is None and GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
+        _genai_client = genai
+    return _genai_client
 
 def generate_ai_email_content(user_name, account_name, alert_type, budget_data, category_data):
     """Uses Gemini to draft a personalized, empathetic email tailored to a specific account."""
-    valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    target_model = next((m for m in valid_models if 'flash' in m), "gemini-pro")
-    model = genai.GenerativeModel(target_model)
+    genai_client = _get_genai_client() or get_gemini_client()
+    target_model = get_best_model(genai_client, prefer_flash=True)
+    model = genai_client.GenerativeModel(target_model)
     
     prompt = f"""
     You are an expert, empathetic AI Financial Advisor for {user_name}.

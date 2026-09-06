@@ -3,13 +3,16 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 from utils.security import encrypt_data, decrypt_data
-from utils.anomaly_engine import check_and_alert_anomaly  # ✨ NEW: Import the anomaly engine
-import google.generativeai as genai 
-import json 
-import re 
-import time 
-import tempfile 
-import os 
+from utils.anomaly_engine import check_and_alert_anomaly
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
+import json
+import re
+import time
+import tempfile
+import os
+
+# Initialize AI client
+genai_client = get_gemini_client() 
 
 def render_page(supabase):
     
@@ -113,38 +116,10 @@ def render_page(supabase):
                     temp_path = None
                     gemini_file = None
                     try:
-                        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                        
-                        valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                        
-                        target_model = None
-                        preferred_order = [
-                            'gemini-2.5-flash', 
-                            'gemini-2.0-flash', 
-                            'gemini-flash-latest',
-                            'gemini-1.5-flash', 
-                            'gemini-2.5-pro',
-                            'gemini-pro-latest'
-                        ]
-                        
-                        for pref in preferred_order:
-                            if pref in valid_models:
-                                target_model = pref
-                                break
-                                
-                        if not target_model:
-                            for m in valid_models:
-                                if 'flash' in m.lower():
-                                    target_model = m
-                                    break
-                                
-                        if not target_model:
-                            st.error(f"⚠️ Could not find a suitable model. Your key allows: {', '.join(valid_models)}")
-                            st.stop()
-                            
+                        target_model = get_best_model(genai_client, prefer_flash=True)
+                        model = genai_client.GenerativeModel(target_model)
+
                         st.info(f"*(Diagnostic: Successfully connected to next-gen model '{target_model}')*")
-                            
-                        model = genai.GenerativeModel(target_model)
                         
                         prompt = """
                         You are a strict financial data extraction AI. Extract all transactions from this document.

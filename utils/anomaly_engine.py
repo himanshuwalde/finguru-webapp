@@ -3,22 +3,13 @@ import pandas as pd
 from datetime import datetime
 import google.generativeai as genai
 from utils.email_engine import send_financial_alert
-
-# Attempt to load Gemini Key (Handles both Render OS env and Streamlit Secrets)
-try:
-    import streamlit as st
-    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or st.secrets.get("GEMINI_API_KEY")
-except ImportError:
-    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
 def generate_anomaly_email_content(user_name, account_name, amount, description, date_str, is_temporal, is_behavioral, category_mean):
     """Uses Gemini to draft a high-urgency fraud alert."""
-    valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    target_model = next((m for m in valid_models if 'flash' in m), "gemini-pro")
-    model = genai.GenerativeModel(target_model)
+    genai_client = get_gemini_client()
+    target_model = get_best_model(genai_client, prefer_flash=True)
+    model = genai_client.GenerativeModel(target_model)
     
     reasons = []
     if is_temporal:

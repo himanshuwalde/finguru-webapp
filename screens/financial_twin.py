@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import google.generativeai as genai
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
-# Give Gemini access
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Initialize AI client
+genai_client = get_gemini_client()
 
 def run_monte_carlo(initial_amount, annual_contribution, years, mu, sigma, simulations=500):
     """Runs a Monte Carlo simulation for portfolio growth."""
@@ -178,23 +178,21 @@ def render_page(supabase):
                 message_placeholder = st.empty()
                 with st.spinner("Your future self is calculating..."):
                     try:
-                        valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                        target_model = next((m for m in valid_models if 'flash' in m), "gemini-pro")
-                        
-                        model = genai.GenerativeModel(target_model)
-                        
-                        # ✨ NEW: Pass the chat history so the AI remembers if it asked a question
+                        target_model = get_best_model(genai_client, prefer_flash=True)
+                        model = genai_client.GenerativeModel(target_model)
+
+                        # Pass the chat history so the AI remembers if it asked a question
                         chat_history_str = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in st.session_state.twin_messages])
-                        
-                        # ✨ THE FIX: Optimized prompt with state-dependent logic and actual portfolio values
+
+                        # Optimized prompt with state-dependent logic and actual portfolio values
                         system_prompt = f"""
                         You are the user's "Financial Twin"—their future self at age {context_data['age']}. User's Current age: {context_data['AGE']}.
-                        Current expected retirement net worth: ₹{context_data['median']:,.0f} 
+                        Current expected retirement net worth: ₹{context_data['median']:,.0f}
                         (Range: ₹{context_data['worst_case']:,.0f} to ₹{context_data['best_case']:,.0f}).
                         The user's actual current portfolio growth rate is {context_data['portfolio_return']}%.
 
                         Read the chat history to determine which phase you are in:
-                        
+
                         PHASE 1: THE WISDOM (Initial Response to a purchase idea)
                         - Speak in the first person ("I am you from the future...").
                         - Use very easy, simple, and understandable language. No complex financial jargon.
@@ -211,15 +209,19 @@ def render_page(supabase):
                           4. Mention basic tax benefits if applicable.
 
                         Maintain a wise, protective, and easy-to-understand tone at all times.
-                        
+
                         --- CHAT HISTORY ---
                         {chat_history_str}
                         """
-                        
-                        response = model.generate_content(system_prompt)
-                        message_placeholder.markdown(response.text)
-                        st.session_state.twin_messages.append({"role": "assistant", "content": response.text})
-                        
+
+                        response_text = generate_content_safe(model, system_prompt)
+
+                        if response_text:
+                            message_placeholder.markdown(response_text)
+                            st.session_state.twin_messages.append({"role": "assistant", "content": response_text})
+                        else:
+                            raise Exception("Empty response from model")
+
                     except Exception as e:
                         error_str = str(e)
                         if "429" in error_str or "Quota exceeded" in error_str:

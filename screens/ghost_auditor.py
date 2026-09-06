@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import re
-from datetime import datetime, timedelta 
-import google.generativeai as genai
-from utils.security import decrypt_data 
+from datetime import datetime, timedelta
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
+from utils.security import decrypt_data
 
-# Give Gemini access
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Initialize AI client
+genai_client = get_gemini_client()
 
 def clean_upi_string(desc):
     """Cleans messy Indian UPI strings using Regex."""
@@ -216,29 +216,32 @@ def render_page(supabase):
             if st.button("Generate Audit Report", type="primary", use_container_width=True):
                 with st.spinner("AI is calculating your 'Latte Factor'..."):
                     try:
-                        valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                        target_model = next((m for m in valid_models if 'flash' in m), "gemini-pro")
-                        model = genai.GenerativeModel(target_model)
-                        
+                        target_model = get_best_model(genai_client, prefer_flash=True)
+                        model = genai_client.GenerativeModel(target_model)
+
                         top_categories = category_breakdown.head(3).to_dict('records')
                         context_str = ", ".join([f"₹{cat['amount']} on {cat['smart_category']}" for cat in top_categories])
-                        
+
                         system_prompt = f"""
-                        You are a strict but helpful Indian financial auditor. The user has spent ₹{total_micro_spend} 
+                        You are a strict but helpful Indian financial auditor. The user has spent ₹{total_micro_spend}
                         in the {time_filter.lower()} purely on micro-transactions under ₹100 via UPI.
-                        
+
                         Their top drains are: {context_str}.
-                        
-                        Write a short, punchy 2-paragraph audit report. 
+
+                        Write a short, punchy 2-paragraph audit report.
                         In the first paragraph, call out their specific habits over this {time_filter.lower()} period.
-                        In the second paragraph, tell them exactly what that total ₹{total_micro_spend} could have bought them 
-                        in the Indian stock market (e.g., 'That's 2 units of a Nifty 50 Bluechip ETF' or 'That's X shares of Reliance'). 
+                        In the second paragraph, tell them exactly what that total ₹{total_micro_spend} could have bought them
+                        in the Indian stock market (e.g., 'That's 2 units of a Nifty 50 Bluechip ETF' or 'That's X shares of Reliance').
                         Be specific, realistic with current market prices, and inspiring.
                         """
-                        
-                        response = model.generate_content(system_prompt)
-                        st.success(response.text)
-                        
+
+                        response_text = generate_content_safe(model, system_prompt)
+
+                        if response_text:
+                            st.success(response_text)
+                        else:
+                            raise Exception("Empty response from model")
+
                     except Exception as e:
                         st.error(f"Audit failed. **System Error:** `{str(e)}`")
         else:

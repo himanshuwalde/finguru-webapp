@@ -1,26 +1,15 @@
 import streamlit as st
 import datetime
-import google.generativeai as genai
 from PIL import Image
 import json
 import re
 import pandas as pd
 from utils.security import encrypt_data
-from utils.anomaly_engine import check_and_alert_anomaly  # ✨ NEW: Import the anomaly engine
+from utils.anomaly_engine import check_and_alert_anomaly
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-
-@st.cache_data
-def get_allowed_models():
-    try:
-        valid_models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                clean_name = m.name.replace('models/', '')
-                valid_models.append(clean_name)
-        return valid_models
-    except Exception as e:
-        return [f"Error fetching models: {e}"]
+# Initialize AI client
+genai_client = get_gemini_client()
 
 def render_page(supabase):
     
@@ -111,19 +100,19 @@ def render_page(supabase):
     if 'trans_recurring' not in st.session_state: 
         st.session_state.trans_recurring = bool(editing_data.get('is_recurring')) if is_editing else False
 
-    allowed_models = get_allowed_models()
+    # Use centralized model selection
+    target_model = get_best_model(genai_client, prefer_flash=True)
+    model = genai_client.GenerativeModel(target_model)
+
     if not is_editing:
         st.write("---")
-        default_idx = next((i for i, m in enumerate(allowed_models) if "1.5-flash" in m), 0)
-        selected_model_name = st.selectbox("⚙️ Select Vision AI Model", allowed_models, index=default_idx)
         uploaded_file = st.file_uploader("📸 Scan Receipt with AI", type=["jpg", "jpeg", "png"])
-        
+
         if uploaded_file is not None and st.button("Extract Data", use_container_width=True):
-            with st.spinner(f"🧠 Multimodal AI ({selected_model_name}) analyzing layout and text..."):
+            with st.spinner(f"🧠 Multimodal AI ({target_model}) analyzing layout and text..."):
                 try:
-                    vision_model = genai.GenerativeModel(selected_model_name)
                     image = Image.open(uploaded_file)
-                    
+
                     prompt = f"""
                     Extract data from this receipt. Use EXACTLY these JSON keys:
                     "merchant": string, name of the store.
@@ -131,14 +120,14 @@ def render_page(supabase):
                     "date": string, YYYY-MM-DD format (or null).
                     "category": string, MUST be exactly one of these: {base_categories}. Guess the best fit based on the merchant.
                     """
-                    
-                    response = vision_model.generate_content(
+
+                    response = model.generate_content(
                         [prompt, image],
-                        generation_config=genai.GenerationConfig(response_mime_type="application/json")
+                        generation_config=genai_client.GenerationConfig(response_mime_type="application/json")
                     )
-                    
+
                     extracted_data = json.loads(response.text)
-                    
+
                     extracted_desc = str(extracted_data.get("merchant", "")).title()
                     raw_amount = str(extracted_data.get("amount", "0"))
                     clean_amount = float(re.sub(r'[^\d.]', '', raw_amount) or "0")
@@ -150,15 +139,15 @@ def render_page(supabase):
                             extracted_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
                     except Exception:
                         pass
-                    
+
                     st.session_state.trans_amount = clean_amount
                     st.session_state.trans_desc = extracted_desc
                     st.session_state.trans_category = extracted_category
                     st.session_state.trans_date = extracted_date
-                    
+
                     st.success("✅ Receipt successfully scanned!")
-                    st.rerun() 
-                    
+                    st.rerun()
+
                 except Exception as e:
                     st.error(f"Failed to process receipt: {e}")
                     
@@ -183,18 +172,21 @@ def render_page(supabase):
                 if description:
                     with st.spinner("Asking Gemini..."):
                         try:
-                            text_model_name = next((m for m in allowed_models if "vision" not in m), allowed_models[0])
-                            text_model = genai.GenerativeModel(text_model_name)
+                            # Use the same model for text (flash models handle both vision and text well)
+                            text_model = genai_client.GenerativeModel(target_model)
                             prompt = f"Categorize the transaction '{description}' into EXACTLY one of these categories: {base_categories}. Return ONLY the exact category name as pure text, nothing else."
-                            
-                            response = text_model.generate_content(prompt)
-                            suggested_category = response.text.strip()
-                            
-                            if suggested_category in base_categories:
-                                st.session_state.trans_category = suggested_category
-                                st.rerun() 
+
+                            response_text = generate_content_safe(text_model, prompt)
+
+                            if response_text:
+                                suggested_category = response_text.strip()
+                                if suggested_category in base_categories:
+                                    st.session_state.trans_category = suggested_category
+                                    st.rerun()
+                                else:
+                                    st.warning(f"AI suggested '{suggested_category}', which isn't in your list.")
                             else:
-                                st.warning(f"AI suggested '{suggested_category}', which isn't in your list.")
+                                raise Exception("Empty response from model")
                         except Exception as e:
                             st.error(f"Could not reach AI. Details: {e}")
                 else:

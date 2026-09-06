@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import google.generativeai as genai
 from utils.security import decrypt_data
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
-# Give Gemini access
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Initialize AI client
+genai_client = get_gemini_client()
 
 def render_page(supabase):
     # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags to prevent Streamlit render glitches
@@ -125,46 +125,25 @@ def render_page(supabase):
         if st.button("Ask AI to Analyze These Outliers", type="primary"):
             with st.spinner("AI is reviewing the flagged transactions..."):
                 try:
-                    # 1. Ask Google what models your specific API key has access to
-                    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                    
-                    # 2. Our preference: Give us the smartest/fastest available model
-                    preferred_models = [
-                        'models/gemini-1.5-flash', 
-                        'models/gemini-1.5-pro', 
-                        'models/gemini-2.5-flash',
-                        'models/gemini-pro'
-                    ]
-                    
-                    # 3. Find the highest matching preference
-                    target_model = None
-                    for pref in preferred_models:
-                        if pref in available_models:
-                            target_model = pref
-                            break
-                    
-                    # Fallback to whatever is available if our preferences aren't met
-                    if not target_model and available_models:
-                        target_model = available_models[0]
+                    target_model = get_best_model(genai_client, prefer_flash=True)
+                    model = genai_client.GenerativeModel(target_model)
 
-                    # 4. Generate!
-                    if target_model:
-                        model = genai.GenerativeModel(target_model)
-                        prompt = f"""
-                        You are an expert fraud analyst and financial auditor. I used statistical Z-scores and time-bounds to flag these unusual transactions:
-                        {anomaly_summary}
-                        
-                        Write a brief, professional warning message to the user. Explain *why* these specific transactions are flagged (e.g., late night, or higher than their usual category average). Because the data now includes 'account_name', be sure to mention which bank account is at risk. Give them one actionable piece of advice (like 'verify with your bank' or 'freeze your card if unrecognized').
-                        Keep it short, direct, and do not use markdown bolding.
-                        """
-                        response = model.generate_content(prompt)
-                        
-                        if response.text:
-                            st.session_state.audit_report = response.text
-                            st.rerun()
-                        else:
-                            raise Exception("Empty response from model")
-                            
+                    prompt = f"""
+                    You are an expert fraud analyst and financial auditor. I used statistical Z-scores and time-bounds to flag these unusual transactions:
+                    {anomaly_summary}
+
+                    Write a brief, professional warning message to the user. Explain *why* these specific transactions are flagged (e.g., late night, or higher than their usual category average). Because the data now includes 'account_name', be sure to mention which bank account is at risk. Give them one actionable piece of advice (like 'verify with your bank' or 'freeze your card if unrecognized').
+                    Keep it short, direct, and do not use markdown bolding.
+                    """
+
+                    response_text = generate_content_safe(model, prompt)
+
+                    if response_text:
+                        st.session_state.audit_report = response_text
+                        st.rerun()
+                    else:
+                        raise Exception("Empty response from model")
+
                 except Exception as e:
                     print(f"AI Audit Error: {e}")
                     fallback = "These transactions fall significantly outside your historical spending patterns or occurred during unusual hours. Please review them carefully. If you do not recognize these charges, contact your bank immediately to secure your account."

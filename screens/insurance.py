@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
-# Hand the API key to Gemini in this file
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Initialize AI client
+genai_client = get_gemini_client()
 
 # ==========================================
 # ✨ THE MARKET MATCH ENGINE (Real-world Indian Policies)
@@ -270,52 +270,25 @@ def render_page(supabase):
             with st.spinner("Analyzing your financial profile with Gemini..."):
                 prompt = f"""
                 You are a sympathetic, expert financial advisor. Review this user's profile and write a short, 2-paragraph summary explaining WHY they need this insurance.
-                Profile: Age {st.session_state.user_age}, {st.session_state.user_dependents} dependents. 
+                Profile: Age {st.session_state.user_age}, {st.session_state.user_dependents} dependents.
                 Annual Income: ₹{annual_income}. Debt: ₹{total_liability}.
                 Recommended Term Life: ₹{recommended_term_life}. Recommended Health: ₹{recommended_health}.
                 Keep it professional, empathetic, and strictly financial. Do not use markdown formatting like **bold**, just pure text.
                 """
-                
-                advice_generated = False
-                
-                try:
-                    # 1. Ask Google what models your specific API key has access to
-                    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                    
-                    # 2. Our preference: Give us the smartest/fastest available model
-                    preferred_models = [
-                        'models/gemini-1.5-flash', 
-                        'models/gemini-1.5-pro', 
-                        'models/gemini-2.5-flash',
-                        'models/gemini-pro'
-                    ]
-                    
-                    # 3. Find the highest matching preference
-                    target_model = None
-                    for pref in preferred_models:
-                        if pref in available_models:
-                            target_model = pref
-                            break
-                    
-                    # Fallback to whatever is available if our preferences aren't met
-                    if not target_model and available_models:
-                        target_model = available_models[0]
 
-                    # 4. Generate!
-                    if target_model:
-                        model = genai.GenerativeModel(target_model)
-                        response = model.generate_content(prompt)
-                        
-                        if response.text:
-                            st.session_state.ai_advice = response.text
-                            advice_generated = True
-                            
+                try:
+                    target_model = get_best_model(genai_client, prefer_flash=True)
+                    model = genai_client.GenerativeModel(target_model)
+                    response_text = generate_content_safe(model, prompt)
+
+                    if response_text:
+                        st.session_state.ai_advice = response_text
+                    else:
+                        raise Exception("Empty response from model")
+
                 except Exception as e:
                     print(f"Gemini API Generation Error: {e}")
-
-                # 5. The absolute offline fallback in case the API is down entirely
-                if not advice_generated:
                     fallback_text = f"Based on your profile as a {st.session_state.user_age}-year-old with {st.session_state.user_dependents} dependents, securing a Term Life cover of ₹{recommended_term_life:,.0f} is highly recommended. This ensures that your annual income of ₹{annual_income:,.0f} is replaced and your outstanding liabilities of ₹{total_liability:,.0f} are cleared if you are not around.\n\nAdditionally, a Health Insurance cover of ₹{recommended_health:,.0f} is crucial. {health_note} This protects your primary savings from being drained by sudden medical emergencies."
                     st.session_state.ai_advice = fallback_text
-                
+
                 st.rerun()

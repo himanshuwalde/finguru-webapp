@@ -2,11 +2,10 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import plotly.graph_objects as go
-import google.generativeai as genai
-import time
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
-# Give Gemini access
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Initialize AI client
+genai_client = get_gemini_client()
 
 def calculate_probability(target, current, monthly_contrib, months_left):
     """Calculates a rough probability (0-99%) of hitting a goal based on current trajectory."""
@@ -223,24 +222,27 @@ def render_page(supabase):
         with c_ai:
             with st.spinner("Analyzing financial impact..."):
                 try:
-                    valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                    target_model = next((m for m in valid_models if 'flash' in m), "gemini-pro")
-                    model = genai.GenerativeModel(target_model)
+                    target_model = get_best_model(genai_client, prefer_flash=True)
+                    model = genai_client.GenerativeModel(target_model)
                     prompt = f"Analyze: Spending ₹{final_price} on product from {product_url}. Goal: {target_goal['goal_name']}. Probability drops from {base_prob}% to {new_prob}%. Give a short, brutal financial reality check."
-                    
-                    response = model.generate_content(prompt)
-                    st.markdown(f"### AI Verdict\n{response.text}")
-                    
-                    st.write("")
-                    if new_prob < 50:
-                        st.error("🚨 **Authorization Denied.** This purchase puts your long-term security at risk.")
-                        if st.button("Request Human Override"):
-                            st.warning("Override request sent to your backup financial buddy.")
+
+                    response_text = generate_content_safe(model, prompt)
+
+                    if response_text:
+                        st.markdown(f"### AI Verdict\n{response_text}")
+
+                        st.write("")
+                        if new_prob < 50:
+                            st.error("🚨 **Authorization Denied.** This purchase puts your long-term security at risk.")
+                            if st.button("Request Human Override"):
+                                st.warning("Override request sent to your backup financial buddy.")
+                        else:
+                            st.success("✅ **Authorization Possible.** Your trajectory remains stable.")
+                            if st.button("Generate Virtual Card"):
+                                supabase.table("pending_checkouts").update({"status": "approved"}).eq("id", request_id).execute()
+                                show_virtual_card(target_goal['goal_name'], final_price)
                     else:
-                        st.success("✅ **Authorization Possible.** Your trajectory remains stable.")
-                        if st.button("Generate Virtual Card"):
-                            supabase.table("pending_checkouts").update({"status": "approved"}).eq("id", request_id).execute()
-                            show_virtual_card(target_goal['goal_name'], final_price)
-                            
+                        raise Exception("Empty response from model")
+
                 except Exception as e:
                     st.error(f"❌ AI Logic Error: {str(e)}")

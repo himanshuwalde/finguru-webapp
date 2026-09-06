@@ -3,10 +3,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import networkx as nx
-import google.generativeai as genai
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
-# Give Gemini access
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Initialize AI client
+genai_client = get_gemini_client()
 
 # ✨ NEW FEATURE: The Pop-up Claim Toolkit Modal
 @st.dialog("💼 India Asset Claim Navigator", width="large")
@@ -214,14 +214,17 @@ def render_page(supabase):
                     if btn_c1.button("✉️ Draft Invite", key=f"inv_{succ['id']}", use_container_width=True):
                         with st.spinner("Drafting secure message..."):
                             try:
-                                valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                                target_model = next((m for m in valid_models if 'flash' in m), "gemini-pro")
-                                model = genai.GenerativeModel(target_model)
-                                
+                                target_model = get_best_model(genai_client, prefer_flash=True)
+                                model = genai_client.GenerativeModel(target_model)
+
                                 asset_context = f"the following assets: {', '.join(assigned_assets)}" if assigned_assets else "my financial portfolio"
                                 prompt = f"Draft a short, warm WhatsApp message to my {succ['relationship']}, {succ_name}. Let them know I added them as a 'Successor-Viewer' for {asset_context} on the AI Financial Twin app. Reassure them it's a Zero-Balance view for safety."
-                                response = model.generate_content(prompt)
-                                st.info("📋 **Copy & Paste:**\n\n" + response.text)
+                                response_text = generate_content_safe(model, prompt)
+
+                                if response_text:
+                                    st.info("📋 **Copy & Paste:**\n\n" + response_text)
+                                else:
+                                    raise Exception("Empty response from model")
                             except Exception as e:
                                 st.error(f"Failed to generate invite: {e}")
 
@@ -375,11 +378,14 @@ def render_page(supabase):
         if st.button("Consult AI Legacy Agent", type="primary"):
             with st.spinner("Agent is analyzing..."):
                 try:
-                    valid_models = [m.name.replace('models/', '') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                    target_model = next((m for m in valid_models if 'flash' in m), "gemini-pro")
-                    model = genai.GenerativeModel(target_model)
+                    target_model = get_best_model(genai_client, prefer_flash=True)
+                    model = genai_client.GenerativeModel(target_model)
                     prompt = f"You are an empathetic Intergenerational Wealth Agent. User has dormant accounts: {', '.join([s['name'] for s in unassigned_stagnant])}. Write a short 2-paragraph message noting the stagnation and urging them to assign a successor."
-                    response = model.generate_content(prompt)
-                    st.warning(response.text)
+                    response_text = generate_content_safe(model, prompt)
+
+                    if response_text:
+                        st.warning(response_text)
+                    else:
+                        raise Exception("Empty response from model")
                 except Exception as e:
                     st.error("Please assign a Successor-Viewer above.")
