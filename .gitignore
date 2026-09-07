@@ -25,7 +25,7 @@ Thumbs.db
 
 # Model files (large files - consider Git LFS)
 *.joblib
-*.pkl
+# *.pkl  (allow small model files like trust_engine_model.pkl)
 
 # Data files (optional - uncomment if you don't want to track data)
 # *.csv
