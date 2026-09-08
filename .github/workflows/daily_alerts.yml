@@ -24,7 +24,7 @@ jobs:
           
       - name: Install Dependencies
         run: |
-          pip install pandas supabase google-generativeai
+          pip install -r requirements.txt
           
       - name: Wake Up & Run Alert Engine
         env:

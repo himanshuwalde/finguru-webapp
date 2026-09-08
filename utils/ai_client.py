@@ -1,32 +1,98 @@
 """
 Centralized AI Client for Google Gemini API interactions.
 Provides model selection, configuration, and error handling in one place.
+Works in both Streamlit app context and standalone scripts (like alert_engine.py).
 """
-import streamlit as st
-import google.generativeai as genai
+import os
+import functools
+import logging
 from typing import Optional, List
+
+import google.generativeai as genai
+
+# Configure logging for standalone scripts
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Try to import streamlit, but make it optional
+try:
+    import streamlit as st
+    HAS_STREAMLIT = True
+except ImportError:
+    HAS_STREAMLIT = False
+    st = None
+
+
+def _get_api_key() -> str:
+    """Get API key from environment (standalone) or Streamlit secrets (app)."""
+    # First try environment variable (works in both contexts)
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if api_key:
+        return api_key
+
+    # Fallback to Streamlit secrets if available
+    if HAS_STREAMLIT and hasattr(st, 'secrets'):
+        api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+        if api_key:
+            return api_key
+
+    raise ValueError("GEMINI_API_KEY not found in environment variables or Streamlit secrets")
 
 
 # Cache the Gemini client configuration
-@st.cache_resource
-def get_gemini_client():
-    """Initialize and return configured Gemini client."""
-    api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in secrets")
-    genai.configure(api_key=api_key)
-    return genai
+if HAS_STREAMLIT:
+    @st.cache_resource
+    def get_gemini_client():
+        """Initialize and return configured Gemini client."""
+        api_key = _get_api_key()
+        genai.configure(api_key=api_key)
+        return genai
+else:
+    # Use functools.lru_cache for standalone scripts
+    @functools.lru_cache(maxsize=1)
+    def get_gemini_client():
+        """Initialize and return configured Gemini client."""
+        api_key = _get_api_key()
+        genai.configure(api_key=api_key)
+        return genai
 
 
-@st.cache_data(ttl=3600)  # Cache model list for 1 hour
-def get_available_models(_genai_client) -> List[str]:
-    """Fetch all models that support generateContent."""
-    try:
-        models = _genai_client.list_models()
-        return [m.name.replace('models/', '') for m in models if 'generateContent' in m.supported_generation_methods]
-    except Exception as e:
-        st.warning(f"Could not fetch models: {e}")
-        return []
+def _warn(message: str):
+    """Log warning in both Streamlit and standalone contexts."""
+    if HAS_STREAMLIT and st:
+        st.warning(message)
+    else:
+        logger.warning(message)
+
+
+def _error(message: str):
+    """Log error in both Streamlit and standalone contexts."""
+    if HAS_STREAMLIT and st:
+        st.error(message)
+    else:
+        logger.error(message)
+
+
+if HAS_STREAMLIT:
+    @st.cache_data(ttl=3600)  # Cache model list for 1 hour
+    def get_available_models(_genai_client) -> List[str]:
+        """Fetch all models that support generateContent."""
+        try:
+            models = _genai_client.list_models()
+            return [m.name.replace('models/', '') for m in models if 'generateContent' in m.supported_generation_methods]
+        except Exception as e:
+            _warn(f"Could not fetch models: {e}")
+            return []
+else:
+    @functools.lru_cache(maxsize=1)
+    def get_available_models(_genai_client) -> List[str]:
+        """Fetch all models that support generateContent."""
+        try:
+            models = _genai_client.list_models()
+            return [m.name.replace('models/', '') for m in models if 'generateContent' in m.supported_generation_methods]
+        except Exception as e:
+            _warn(f"Could not fetch models: {e}")
+            return []
 
 
 def get_best_model(_genai_client, prefer_flash: bool = True) -> str:
@@ -101,6 +167,6 @@ def generate_content_safe(model, prompt: str, max_retries: int = 2) -> Optional[
                 continue
         except Exception as e:
             if attempt == max_retries:
-                st.error(f"AI generation failed after {max_retries + 1} attempts: {e}")
+                _error(f"AI generation failed after {max_retries + 1} attempts: {e}")
                 return None
     return None
