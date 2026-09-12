@@ -1,4 +1,3 @@
-# Himanshu Walde
 import streamlit.components.v1 as components
 import pages.profile as profile
 import pages.add_transaction as add_transaction
@@ -258,7 +257,14 @@ st.markdown("""
     }
 
     /* ======== Landing / marketing page ======== */
-    .landing-hero { text-align: center; padding: 3.2rem 1rem 1.2rem; }
+    .landing-hero {
+        text-align: center;
+        padding: 3.2rem 1rem 1.2rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+    }
     .landing-eyebrow {
         display: inline-block; text-transform: uppercase; letter-spacing: 2px;
         font-size: 0.74rem; font-weight: 700; color: var(--text-color);
@@ -269,17 +275,26 @@ st.markdown("""
     .landing-hero h1 {
         font-size: 4.2rem; font-weight: 900; line-height: 1.1; margin-bottom: 1.2rem;
         letter-spacing: -0.8px;
+        text-align: center;
+        width: 100%;
     }
     .landing-hero h1 .gradient {
         background: linear-gradient(45deg, #2563EB, #9333EA);
         -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
     }
-    .landing-sub {
+    /* Force this block to sit centered regardless of Streamlit's
+       stMarkdownContainer / element-container margin resets */
+    p.landing-sub,
+    div[data-testid="stMarkdownContainer"] p.landing-sub {
+        display: block !important;
+        text-align: center !important;
         font-size: 1.05rem; color: var(--text-color); opacity: .75;
-        max-width: 820px; margin: 0 auto 1.8rem auto; line-height: 1.7;
-        text-align: center;
+        width: 100% !important;
+        max-width: 820px !important;
+        margin: 0 auto 1.8rem auto !important;
+        line-height: 1.7;
     }
-    .hero-pills { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem; }
+    .hero-pills { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem; width: 100%; }
     .hero-pill {
         font-size: .78rem; font-weight: 600; letter-spacing: .2px; padding: 5px 13px;
         border-radius: 999px; color: var(--text-color);
@@ -371,6 +386,30 @@ def go_to_auth():
 
 def go_back_home():
     st.session_state.show_auth_page = False
+
+def render_module_grid(modules, per_row=3):
+    """Render module cards in rows of `per_row`. If the last row has fewer
+    cards than `per_row`, add equal spacer columns on both sides so the
+    partial row stays centered instead of hugging the left edge."""
+    for i in range(0, len(modules), per_row):
+        row_items = modules[i:i + per_row]
+        n = len(row_items)
+        if n == per_row:
+            cols = list(st.columns(per_row))
+        else:
+            spacer = (per_row - n) / 2
+            cols = list(st.columns([spacer] + [1] * n + [spacer]))[1:-1]
+        for card_col, (emoji, grad, title, desc, tags) in zip(cols, row_items):
+            tag_html = "".join(f'<span class="module-tag">{t}</span>' for t in tags)
+            with card_col:
+                st.markdown(f"""
+                <div class="module-card">
+                    <div class="module-icon" style="background:{grad};">{emoji}</div>
+                    <div class="module-title">{title}</div>
+                    <div class="module-desc">{desc}</div>
+                    <div class="module-tags">{tag_html}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
 if st.session_state.logged_in:
     # ==========================================
@@ -741,21 +780,7 @@ else:
          ["Grounded Gemini", "Intent Router", "Offline Fallback"]),
     ]
 
-    for i in range(0, len(core_modules), 3):
-        cols = st.columns(3)
-        for j in range(3):
-            if i + j < len(core_modules):
-                emoji, grad, title, desc, tags = core_modules[i + j]
-                tag_html = "".join(f'<span class="module-tag">{t}</span>' for t in tags)
-                with cols[j]:
-                    st.markdown(f"""
-                    <div class="module-card">
-                        <div class="module-icon" style="background:{grad};">{emoji}</div>
-                        <div class="module-title">{title}</div>
-                        <div class="module-desc">{desc}</div>
-                        <div class="module-tags">{tag_html}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+    render_module_grid(core_modules)
 
     st.write("")
 
@@ -789,21 +814,7 @@ else:
          ["Asset Mapping", "Dormancy Alerts", "Legacy Planning"]),
     ]
 
-    for i in range(0, len(detection_modules), 3):
-        cols = st.columns(3)
-        for j in range(3):
-            if i + j < len(detection_modules):
-                emoji, grad, title, desc, tags = detection_modules[i + j]
-                tag_html = "".join(f'<span class="module-tag">{t}</span>' for t in tags)
-                with cols[j]:
-                    st.markdown(f"""
-                    <div class="module-card">
-                        <div class="module-icon" style="background:{grad};">{emoji}</div>
-                        <div class="module-title">{title}</div>
-                        <div class="module-desc">{desc}</div>
-                        <div class="module-tags">{tag_html}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+    render_module_grid(detection_modules)
 
     st.write("")
 
@@ -834,21 +845,7 @@ else:
          ["Impulse Blocker", "AI Authorization", "Budget Protection"]),
     ]
 
-    for i in range(0, len(account_modules), 3):
-        cols = st.columns(3)
-        for j in range(3):
-            if i + j < len(account_modules):
-                emoji, grad, title, desc, tags = account_modules[i + j]
-                tag_html = "".join(f'<span class="module-tag">{t}</span>' for t in tags)
-                with cols[j]:
-                    st.markdown(f"""
-                    <div class="module-card">
-                        <div class="module-icon" style="background:{grad};">{emoji}</div>
-                        <div class="module-title">{title}</div>
-                        <div class="module-desc">{desc}</div>
-                        <div class="module-tags">{tag_html}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+    render_module_grid(account_modules)
 
     st.write("---")
 
