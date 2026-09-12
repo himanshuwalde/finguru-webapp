@@ -1,0 +1,33 @@
+name: Test Engines & Grounded AI (pytest)
+
+# Runs on every push/PR to the default branch and on demand.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # The engine + chatbot tests are DB-free and deliberately do NOT need
+      # Supabase or Gemini keys: pure functions + fake clients. With no key set,
+      # any accidental Gemini call fails fast into the deterministic fallback.
+      - name: Run test suite
+        run: |
+          python -m pytest tests/ -q

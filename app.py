@@ -1,20 +1,25 @@
 # Himanshu Walde
 import streamlit.components.v1 as components
-import screens.profile as profile
-import screens.add_transaction as add_transaction
-import screens.dashboard as dashboard
-import screens.insurance as insurance
-import screens.transactions as transactions
-import screens.anomalies as anomalies
-import screens.financial_twin as financial_twin
-import screens.safe_to_spend as safe_to_spend 
-import screens.family_wealth as family_wealth 
-import screens.ghost_auditor as ghost_auditor
-# import screens.web3_vault as web3_vault
-import screens.account_aggregator as account_aggregator
-import screens.trust_engine as trust_engine
-import screens.legacy_agent as legacy_agent
-import screens.financial_guardrail as financial_guardrail
+import pages.profile as profile
+import pages.add_transaction as add_transaction
+import pages.dashboard as dashboard
+import pages.insurance as insurance
+import pages.transactions as transactions
+import pages.anomalies as anomalies
+import pages.financial_twin as financial_twin
+import pages.safe_to_spend as safe_to_spend
+import pages.family_wealth as family_wealth
+import pages.ghost_auditor as ghost_auditor
+# import pages.web3_vault as web3_vault
+import pages.account_aggregator as account_aggregator
+import pages.trust_engine as trust_engine
+import pages.legacy_agent as legacy_agent
+import pages.financial_guardrail as financial_guardrail
+import pages.tax_planner as tax_planner
+import pages.portfolio as portfolio
+import pages.net_worth as net_worth
+import pages.fire_planner as fire_planner
+import pages.ai_advisor as ai_advisor
 import streamlit as st
 from supabase import create_client, Client
 
@@ -317,6 +322,11 @@ if st.session_state.logged_in:
     menu_options = [
         "⚙️ Profile & Settings",
         "📊 Dashboard (Expense Tracking)",
+        "🧾 Tax Planner (Old vs New Regime)",
+        "📈 Investment Portfolio",
+        "🏦 Net Worth Tracker",
+        "🔥 FIRE Planner (Retirement)",
+        "🤖 AI CA Advisor (Grounded)",
         "📝 Transactions", 
         "🛡️ AI Insurance Advisor", 
         "🔍 Anomaly Finder",
@@ -367,7 +377,7 @@ if st.session_state.logged_in:
     # ==========================================
     # ✨ THE PRIVACY GATEKEEPER
     # ==========================================
-    ai_powered_tools = ["🛡️ AI Insurance Advisor", "👻 Ghost Spend Auditor", "🤖 Financial Twin Simulation"]
+    ai_powered_tools = ["🛡️ AI Insurance Advisor", "👻 Ghost Spend Auditor", "🤖 Financial Twin Simulation", "🤖 AI CA Advisor (Grounded)"]
 
     if choice in ai_powered_tools and not st.session_state.ai_consent:
         st.title("🛡️ AI Privacy & Consent")
@@ -397,6 +407,16 @@ if st.session_state.logged_in:
             profile.render_page(supabase)
         elif choice == "📊 Dashboard (Expense Tracking)":
             dashboard.render_page(supabase)
+        elif choice == "🧾 Tax Planner (Old vs New Regime)":
+            tax_planner.render_page(supabase)
+        elif choice == "📈 Investment Portfolio":
+            portfolio.render_page(supabase)
+        elif choice == "🏦 Net Worth Tracker":
+            net_worth.render_page(supabase)
+        elif choice == "🔥 FIRE Planner (Retirement)":
+            fire_planner.render_page(supabase)
+        elif choice == "🤖 AI CA Advisor (Grounded)":
+            ai_advisor.render_page(supabase)
         elif choice == "📝 Transactions":
             transactions.render_page(supabase)
         elif choice == "🛡️ AI Insurance Advisor":

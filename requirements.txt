@@ -16,3 +16,6 @@ pydantic>=2.5.0
 networkx>=3.2
 Pillow>=10.0
 web3>=6.15
+
+# --- Dev / testing ---
+pytest>=8.0

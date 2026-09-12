@@ -1,0 +1,73 @@
+{
+  "metadata": {
+    "assessment_year": "2026-27",
+    "financial_year": "2025-26",
+    "source": "Income-tax Rules / Union Budget 2025 (FY 2025-26)",
+    "verify": true,
+    "note": "VERIFY every number against the Income Tax Dept. rules before viva."
+  },
+  "cess_rate": 0.04,
+
+  "old_regime": {
+    "standard_deduction_salaried": 50000,
+    "slabs_by_age": {
+      "general": [
+        { "from": 0,        "to": 250000,  "rate": 0.00 },
+        { "from": 250000,   "to": 500000,  "rate": 0.05 },
+        { "from": 500000,   "to": 1000000, "rate": 0.20 },
+        { "from": 1000000,  "to": null,    "rate": 0.30 }
+      ],
+      "senior": [
+        { "from": 0,        "to": 300000,  "rate": 0.00 },
+        { "from": 300000,   "to": 500000,  "rate": 0.05 },
+        { "from": 500000,   "to": 1000000, "rate": 0.20 },
+        { "from": 1000000,  "to": null,    "rate": 0.30 }
+      ],
+      "super_senior": [
+        { "from": 0,        "to": 500000,  "rate": 0.00 },
+        { "from": 500000,   "to": 1000000, "rate": 0.20 },
+        { "from": 1000000,  "to": null,    "rate": 0.30 }
+      ]
+    },
+    "rebate_87a": { "threshold": 500000, "max_amount": 12500 },
+    "deduction_caps": {
+      "sec_80c":        150000,
+      "sec_80ccd_1b":   50000,
+      "sec_80d_self_under60":   25000,
+      "sec_80d_self_senior":    50000,
+      "sec_80d_parents_under60": 25000,
+      "sec_80d_parents_senior":  50000,
+      "home_loan_interest_self_occupied": 200000
+    },
+    "hra": {
+      "metro_fraction": 0.50,
+      "non_metro_fraction": 0.40,
+      "rent_excess_over_basic": 0.10
+    },
+    "allow_list": ["sec_80c", "sec_80d_self", "sec_80d_parents", "sec_80ccd_1b", "sec_80g", "hra", "home_loan_interest"]
+  },
+
+  "new_regime": {
+    "standard_deduction_salaried": 75000,
+    "slabs": [
+      { "from": 0,        "to": 400000,  "rate": 0.00 },
+      { "from": 400000,   "to": 800000,  "rate": 0.05 },
+      { "from": 800000,   "to": 1200000, "rate": 0.10 },
+      { "from": 1200000,  "to": 1600000, "rate": 0.15 },
+      { "from": 1600000,  "to": 2000000, "rate": 0.20 },
+      { "from": 2000000,  "to": 2400000, "rate": 0.25 },
+      { "from": 2400000,  "to": null,    "rate": 0.30 }
+    ],
+    "rebate_87a": { "threshold": 1200000, "max_amount": 60000 },
+    "deduction_caps": {},
+    "allow_list": ["nps_employer"],
+    "note": "New regime (Sec 115BAC): most exemptions (HRA, 24(b), 80C/80D) are NOT available. Employer NPS 80CCD(2) and standard deduction apply."
+  },
+
+  "capital_gains": {
+    "note": "Capital-gains tax is regime-independent. Equity figures are FY 2025-26.",
+    "ltcg_equity_threshold": 125000,
+    "ltcg_equity_rate": 0.125,
+    "stcg_equity_rate": 0.20
+  }
+}

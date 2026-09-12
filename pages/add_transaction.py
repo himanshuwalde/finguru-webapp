@@ -53,7 +53,7 @@ def render_page(supabase):
             st.markdown(f"You are modifying the transaction logged on **{pd.to_datetime(editing_data['transaction_time']).strftime('%b %d, %Y')}**.")
         else:
             st.title("📝 Add Transaction")
-            st.caption(f"🔧 Diagnostic: GenAI Library Version {genai.__version__}")
+            st.caption(f"🔧 Diagnostic: GenAI Library Version {genai_client.__version__}")
     with h_col2:
         st.write("")
         st.button("← Back", use_container_width=True, on_click=exit_form)

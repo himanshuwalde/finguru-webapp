@@ -137,7 +137,7 @@ def render_page(supabase):
                             temp_file.write(uploaded_file.getvalue())
                             temp_path = temp_file.name
 
-                        gemini_file = genai.upload_file(path=temp_path, mime_type=uploaded_file.type)
+                        gemini_file = genai_client.upload_file(path=temp_path, mime_type=uploaded_file.type)
                         response = model.generate_content([prompt, gemini_file])
                         
                         match = re.search(r'\[.*\]', response.text, re.DOTALL)
@@ -227,7 +227,7 @@ def render_page(supabase):
                     
                     finally:
                         if gemini_file:
-                            try: genai.delete_file(gemini_file.name)
+                            try: genai_client.delete_file(gemini_file.name)
                             except: pass
                         if temp_path and os.path.exists(temp_path):
                             try: os.remove(temp_path)

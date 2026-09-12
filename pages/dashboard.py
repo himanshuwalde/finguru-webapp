@@ -5,6 +5,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import json
 from utils.security import decrypt_data
+from services import recommendation_service
 
 # ==========================================
 # 🧠 ML BUDGET ENGINE
@@ -171,6 +172,11 @@ def render_page(supabase):
         st.write("") 
         st.write("") 
         st.button("➕ Add Transaction", type="primary", use_container_width=True, on_click=go_to_scanner)
+
+    # ==========================================
+    #   🎯 FINANCIAL CO-PILOT HERO (unified health + KPIs)
+    # ==========================================
+    _render_health_hero(supabase)
 
     # --- FETCH ACCOUNTS ---
     try:
@@ -597,3 +603,113 @@ def render_page(supabase):
                             st.rerun()
                         except Exception as e: st.error(f"Failed to save account: {e}")
                     else: st.error("Please provide an account name.")
+
+# ==========================================================================
+#  FINANCIAL CO-PILOT HERO — health score + unified KPIs (Phase 7)
+# ==========================================================================
+def _inr(v):
+    try:
+        return f"₹{float(v):,.0f}"
+    except (TypeError, ValueError):
+        return "₹0"
+
+
+def _render_health_hero(supabase):
+    """One source of truth: recommendation_service → same numbers as chat/AI."""
+    try:
+        context = recommendation_service.build_financial_context(
+            supabase, st.session_state.user_id)
+    except Exception as e:
+        st.warning(f"Health summary unavailable: {e}")
+        return
+
+    hs = context["health_score"]
+    kpis = context["kpis"]
+    fin = context["financial"]
+
+    st.markdown(
+        f"""
+        <div style='background:linear-gradient(120deg,#0ea5e9, #7c3aed 55%,#d946ef);
+             border-radius:18px;padding:20px 24px;color:white;margin-bottom:12px'>
+          <div style='display:flex;align-items:center;gap:28px;flex-wrap:wrap'>
+            <div>
+              <div style='font-size:.95rem;opacity:.85;letter-spacing:.3px'>FINANCIAL HEALTH SCORE</div>
+              <div style='font-size:3.2rem;font-weight:800;line-height:1'>
+                {hs['overall']}<span style='font-size:1.2rem;opacity:.75'>/100</span>
+              </div>
+              <div style='font-size:.95rem;opacity:.9'>{hs['verb']}
+                {' · ⚠️ missing data recorded separately' if hs['missing_data'] else ''}</div>
+            </div>
+            <div style='flex:1;min-width:240px'>
+              <div style='font-size:.85rem;opacity:.85;margin-bottom:6px'>
+                Weighted from your real data — savings 25% · spending 20% ·
+                debt 15% · investments 15% · tax 10% · FIRE 15%</div>
+              <div style='background:rgba(255,255,255,.25);border-radius:99px;height:14px;overflow:hidden'>
+                <div style='background:#fff;height:100%;width:{max(0,min(hs["overall"],100))}%;
+                     border-radius:99px;transition:width .6s ease'></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    c = st.columns(6)
+    c[0].metric("🤖 Health Score", f"{hs['overall']}/100", delta=hs["verb"])
+    c[1].metric("🏦 Net Worth", _inr(kpis["net_worth"]))
+    c[2].metric("💸 Monthly Spend", _inr(kpis["monthly_expense"]),
+                f"income {_inr(kpis['monthly_income'])}")
+    c[3].metric("📈 Investments", _inr(kpis["invested_current"]))
+    c[4].metric("🧾 Tax (eff. rate)",
+                f"{kpis['effective_tax_rate']:.1f}%" if kpis["has_tax_data"] else "—",
+                "record in Tax Planner" if not kpis["has_tax_data"] else None)
+    c[5].metric("🔥 P(FIRE)",
+                f"{kpis['fire_probability_pct']:.0f}%" if kpis["has_fire_data"] else "—",
+                "save a FIRE plan" if not kpis["has_fire_data"] else None)
+
+    st.write("")
+    left, right = st.columns([1, 1])
+    with left:
+        st.markdown("###### Pillars")
+        for comp in hs["components"]:
+            bar = st.progress(min(comp["score"] / 100, 1.0))
+            st.markdown(
+                f"<div style='font-size:.82rem;color:var(--text-color);opacity:.75;"
+                f"margin:-8px 0 10px'>{comp['label']} · "
+                f"<b>{comp['score']}</b>/100 ({comp['weight']*100:.0f}%)</div>",
+                unsafe_allow_html=True)
+    with right:
+        st.markdown("###### What the numbers say")
+        for flag in hs["flags"]:
+            emoji = {"positive": "✅", "warning": "⚠️", "danger": "🛑"}.get(
+                flag["severity"], "•")
+            st.markdown(f"- {emoji} {flag['message']}")
+
+        with st.expander("✨ Explain by the AI (grounded in these numbers)"):
+            if st.button("Generate summary", type="primary",
+                         use_container_width=True, key="hero_ai"):
+                summary = recommendation_service.explain_health(context)
+                try:
+                    from utils.ai_client import (get_gemini_client,
+                                                 get_generative_model,
+                                                 generate_content_safe)
+                    genai = get_gemini_client()
+                    model = get_generative_model(genai, prefer_flash=True)
+                    payload = json.dumps({
+                        "kpis": {k: v for k, v in kpis.items()},
+                        "flags": hs["flags"],
+                        "components": [{k: v for k, v in comp.items()
+                                        if k in ("label", "score", "weight")}
+                                       for comp in hs["components"]],
+                    }, default=str)
+                    ai = generate_content_safe(model, (
+                        "You are FinGuru's copilot. Summarise this user's Financial "
+                        "Health Score, name the two most actionable improvements, and "
+                        "keep it under 120 words. Ground everything ONLY in this "
+                        "data:\n\n" + payload), max_retries=1)
+                    if ai:
+                        summary = ai
+                except Exception as e:
+                    print(f"[dashboard] AI explain failed ({e}); deterministic used")
+                st.markdown(summary)
+
+    st.write("---")

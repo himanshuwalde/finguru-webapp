@@ -3,8 +3,13 @@
 enableCORS = false
 enableXsrfProtection = true
 headless = true
-port = $PORT
+# Port is supplied by the launcher on deploy (Procfile/render.yaml pass -server.port=$PORT)
 
 [browser]
 # Ensures the browser doesn't try to "guess" content types (Anti-MIME Sniffing)
 gatherUsageStats = false
+
+[client]
+# FinGuru uses manual sidebar routing from app.py (keeps the AI-consent gate
+# in control). Auto-discovery of pages/ would create a duplicate nav → disabled.
+showSidebarNavigation = false
