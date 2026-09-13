@@ -25,35 +25,19 @@ from supabase import create_client, Client
 st.set_page_config(page_title="AI Financial Guru", page_icon="💰", layout="wide")
 
 # ==========================================
-# ✨ Supabase Email Recovery Catcher
-# Supabase's reset email (implicit flow) delivers the one-time tokens in the
-# URL *hash*:  #access_token=...&refresh_token=...&type=recovery
-# Server-side Python can't read the fragment, so we forward it into the query
-# string (where st.query_params can always access it) plus a `recovery=1`
-# marker. The marker also guards against reload loops.
+# ✨ SUPABASE PASSWORD-RESET HANDOFF
+# Supabase's implicit-flow reset email delivers its one-time tokens in the URL
+# *fragment* (#access_token=...&refresh_token=...&type=recovery). Server-side
+# Python can never see a fragment, and a <script> inside components.html cannot
+# redirect the app either: on Streamlit Cloud the component iframe is sandboxed
+# WITHOUT allow-top-navigation, so window.parent.location.replace() throws a
+# SecurityError (verified against the live deployment). We therefore read the
+# fragment inside a small custom component (recovery_reader/) and hand the
+# tokens back to Python through the component's return value — no navigation.
 # ==========================================
-components.html("""
-<script>
-(function() {
-    try {
-        var loc = window.parent.location;
-
-        // Already forwarded / consumed by Python? Never touch the URL again.
-        if (loc.search.indexOf("recovery=1") !== -1) return;
-
-        var hash = (loc.hash || "").replace(/^#/, "");
-        if (hash && hash.indexOf("type=recovery") !== -1) {
-            var sep = loc.search ? "&" : "?";
-            window.parent.location.replace(
-                loc.origin + loc.pathname + loc.search + sep + "recovery=1&" + hash
-            );
-        }
-    } catch (e) {
-        console.warn("FinGuru recovery catcher error:", e);
-    }
-})();
-</script>
-""", height=0)
+import os as _os
+_RECOVERY_READER_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "recovery_reader")
+_recovery_reader = components.declare_component("recovery_reader", path=_RECOVERY_READER_DIR)
 
 # ==========================================
 # ✨ SIDEBAR THEME FIX
@@ -426,8 +410,8 @@ def _consume_recovery_params():
     real auth session so the New-Password form can update the password.
 
     Handled link shapes:
-      * implicit flow — `access_token`/`refresh_token` forwarded by the JS
-        catcher from the URL fragment into the query string;
+      * implicit flow — `access_token`/`refresh_token` delivered by the
+        recovery_reader component (read from the URL fragment);
       * PKCE flow    — a one-time `code` in the query string;
       * legacy       — a `token_hash` + `type` pair.
 
@@ -475,7 +459,42 @@ def _consume_recovery_params():
     return False
 
 
-_consume_recovery_params()
+def _fold_fragment_into_query():
+    """Read any password-reset tokens out of the URL fragment via the
+    recovery_reader component and merge them into st.query_params so
+    _consume_recovery_params() can establish the session and show the
+    New-Password form. Returns True if recovery tokens were folded in.
+
+    The component only sees the fragment after the page loads, so its value is
+    first available on the *second* script run — a normal component callback —
+    and the session exchange happens on that rerun.
+    """
+    if st.session_state.get("_recovery_handled"):
+        return False
+    try:
+        value = _recovery_reader()
+    except Exception:
+        value = None
+    if not value or not value.get("recovery"):
+        return False
+    try:
+        import urllib.parse
+        tokens = urllib.parse.parse_qs(str(value["recovery"]).lstrip("#"))
+        for key, vals in tokens.items():
+            if vals:
+                st.query_params[key] = vals[0]
+        if "recovery" not in {str(k) for k in st.query_params}:
+            st.query_params["recovery"] = "1"
+    except Exception:
+        return False
+    return True
+
+
+_recovery_folded = _fold_fragment_into_query()
+_recovery_consumed = _consume_recovery_params()
+if _recovery_folded or _recovery_consumed:
+    # The one-time tokens were seen (valid or not) — never re-process them.
+    st.session_state["_recovery_handled"] = True
 
 def go_to_auth():
     st.session_state.show_auth_page = True

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin:0; padding:0; width:100%; height:1px; overflow:hidden; background:transparent; }
+</style>
+</head>
+<body>
+<script>
+// FinGuru recovery-reader component.
+//
+// Supabase's implicit-flow reset email puts its one-time tokens in the URL
+// *fragment* (#access_token=...&refresh_token=...&type=recovery), which Python
+// can never see. This component reads the fragment from the address bar and
+// returns it to the app over Streamlit's custom-component message channel
+// (window.parent.postMessage to the host) — no top-frame navigation is needed,
+// so the component iframe's sandbox (which blocks parent navigation) is fine.
+//
+// Wire protocol (matching @streamlit/component-lib):
+//   1. { type: "streamlit:componentReady", apiVersion: 1, isStreamlitMessage: true }
+//   2. { type: "streamlit:setComponentValue", value, dataType: "json", isStreamlitMessage: true }
+//   3. { type: "streamlit:setFrameHeight", height, isStreamlitMessage: true }
+// The host signals the frame is registered by posting "streamlit:render" in.
+(function () {
+  var sent = false;
+  var scrubbed = false;
+
+  function post(type, payload) {
+    var msg = { isStreamlitMessage: true, type: type };
+    if (payload) for (var k in payload) msg[k] = payload[k];
+    try { window.parent.postMessage(msg, "*"); } catch (e) {}
+  }
+
+  // The fragment lives in the address bar; the app and this component share
+  // the same origin, so walk up the frame chain and read the first reachable
+  // location (top-most wins).
+  function readRecoveryHash() {
+    var candidates = [window.top, window.parent, window];
+    for (var i = 0; i < candidates.length; i++) {
+      var loc;
+      try { loc = candidates[i].location; } catch (e) { continue; }
+      var h = (loc.hash || "").replace(/^#/, "");
+      if (h && h.indexOf("type=recovery") !== -1) {
+        if (!scrubbed) {
+          scrubbed = true;
+          // Best effort: strip the one-time tokens from the URL so they can't be
+          // replayed on a later reload. replaceState is a history mutation, not a
+          // navigation, so the sandbox allows it and the page does not reload.
+          try { candidates[i].history.replaceState(null, "", loc.pathname + loc.search); } catch (e) {}
+        }
+        return h;
+      }
+    }
+    return "";
+  }
+
+  function sendOnce() {
+    if (sent) return;
+    sent = true;
+    var value = { recovery: null, error: null };
+    try { value.recovery = readRecoveryHash() || null; }
+    catch (e) { value.error = String((e && e.message) || e); }
+    post("streamlit:componentReady", { apiVersion: 1 });
+    post("streamlit:setComponentValue", { value: value, dataType: "json" });
+    post("streamlit:setFrameHeight", { height: 1 });
+  }
+
+  window.addEventListener("message", function (evt) {
+    try {
+      var d = evt.data || evt.detail;
+      if (d && d.type === "streamlit:render") sendOnce();
+    } catch (e) {}
+  });
+
+  // Safety net: fire once even if the host's render event was ever missed.
+  setTimeout(sendOnce, 2500);
+})();
+</script>
+</body>
+</html>
