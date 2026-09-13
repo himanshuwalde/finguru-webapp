@@ -26,12 +26,32 @@ st.set_page_config(page_title="AI Financial Guru", page_icon="💰", layout="wid
 
 # ==========================================
 # ✨ Supabase Email Recovery Catcher
+# Supabase's reset email (implicit flow) delivers the one-time tokens in the
+# URL *hash*:  #access_token=...&refresh_token=...&type=recovery
+# Server-side Python can't read the fragment, so we forward it into the query
+# string (where st.query_params can always access it) plus a `recovery=1`
+# marker. The marker also guards against reload loops.
 # ==========================================
 components.html("""
 <script>
-    if (window.parent.location.hash.includes("type=recovery") && !window.parent.location.search.includes("recovery=true")) {
-        window.parent.location.replace(window.parent.location.origin + window.parent.location.pathname + "?recovery=true" + window.parent.location.hash);
+(function() {
+    try {
+        var loc = window.parent.location;
+
+        // Already forwarded / consumed by Python? Never touch the URL again.
+        if (loc.search.indexOf("recovery=1") !== -1) return;
+
+        var hash = (loc.hash || "").replace(/^#/, "");
+        if (hash && hash.indexOf("type=recovery") !== -1) {
+            var sep = loc.search ? "&" : "?";
+            window.parent.location.replace(
+                loc.origin + loc.pathname + loc.search + sep + "recovery=1&" + hash
+            );
+        }
+    } catch (e) {
+        console.warn("FinGuru recovery catcher error:", e);
     }
+})();
 </script>
 """, height=0)
 
@@ -375,11 +395,87 @@ if 'show_auth_page' not in st.session_state: st.session_state.show_auth_page = F
 if 'editing_account' not in st.session_state: st.session_state.editing_account = None 
 if 'force_page' not in st.session_state: st.session_state.force_page = None
 if 'ai_consent' not in st.session_state: st.session_state.ai_consent = False
-if 'auth_mode' not in st.session_state: st.session_state.auth_mode = 'login' 
+if 'auth_mode' not in st.session_state: st.session_state.auth_mode = 'login'
 
-if "recovery" in st.query_params:
-    st.session_state.show_auth_page = True
-    st.session_state.auth_mode = 'update_pwd'
+def _app_base_url():
+    """Best-effort base URL of the app, used as the password-reset redirect so
+    emailed links open on the real host instead of a hardcoded localhost."""
+    try:
+        headers = st.context.headers
+        host = None
+        for k, v in headers.items():  # case varies across proxies
+            if k.lower() == "host":
+                host = v
+                break
+        if not host:
+            return None
+        scheme = "https"
+        for k, v in headers.items():
+            if k.lower() == "x-forwarded-proto" and "https" not in v.lower():
+                scheme = "http"
+                break
+        if host.split(":")[0] in ("localhost", "127.0.0.1"):
+            scheme = "http"
+        return f"{scheme}://{host}"
+    except Exception:
+        return None
+
+
+def _consume_recovery_params():
+    """If the URL carries a Supabase password-reset handoff, exchange it for a
+    real auth session so the New-Password form can update the password.
+
+    Handled link shapes:
+      * implicit flow — `access_token`/`refresh_token` forwarded by the JS
+        catcher from the URL fragment into the query string;
+      * PKCE flow    — a one-time `code` in the query string;
+      * legacy       — a `token_hash` + `type` pair.
+
+    On success the one-time tokens are scrubbed from the URL and True is
+    returned so the caller renders the reset form. Returns False otherwise.
+    """
+    qp = st.query_params
+    is_recovery = bool(qp.get("recovery")) or str(qp.get("type", "")).lower() == "recovery"
+    if not is_recovery:
+        # The app only signs in with email+password, so a bare PKCE `code`
+        # can only come from a Supabase confirm link (recovery in this case).
+        is_recovery = bool(qp.get("code"))
+
+    if not is_recovery:
+        return False
+
+    if not (qp.get("access_token") or qp.get("code") or qp.get("token_hash")):
+        # A recovery marker with no forwarded tokens = old/dead link.
+        st.query_params.clear()
+        st.session_state.show_auth_page = True
+        st.session_state.auth_mode = 'login'
+        st.error("This password-reset link is invalid or has expired. Please request a new one.")
+        return False
+
+    try:
+        if qp.get("access_token"):
+            supabase.auth.set_session(qp["access_token"], qp.get("refresh_token", "") or "")
+        elif qp.get("code"):
+            supabase.auth.exchange_code_for_session({"auth_code": qp["code"]})
+        elif qp.get("token_hash"):
+            supabase.auth.verify_otp({"token_hash": qp["token_hash"], "type": "recovery"})
+
+        if supabase.auth.get_session():
+            # Scrub the temporary tokens from the address bar now that they're used.
+            st.query_params.clear()
+            st.session_state.show_auth_page = True
+            st.session_state.auth_mode = 'update_pwd'
+            return True
+    except Exception:
+        st.query_params.clear()
+        st.session_state.show_auth_page = True
+        st.session_state.auth_mode = 'login'
+        st.error("This password-reset link is invalid or has expired. Please request a new one.")
+        return False
+    return False
+
+
+_consume_recovery_params()
 
 def go_to_auth():
     st.session_state.show_auth_page = True
@@ -680,7 +776,19 @@ elif st.session_state.show_auth_page:
                         st.warning("Please enter your email address first.")
                     else:
                         try:
-                            supabase.auth.reset_password_for_email(reset_email)
+                            # Point the emailed link back at the app the user is
+                            # actually viewing (localhost in dev, the deployed
+                            # host in prod) so it opens the New-Password form.
+                            # Falls back to Supabase's default Site URL if this
+                            # host isn't whitelisted in Auth → Redirect URLs.
+                            redirect_to = _app_base_url()
+                            try:
+                                supabase.auth.reset_password_for_email(
+                                    reset_email,
+                                    {"redirect_to": redirect_to} if redirect_to else None,
+                                )
+                            except Exception:
+                                supabase.auth.reset_password_for_email(reset_email)
                             st.success("✅ Secure link sent! Please check your inbox.")
                         except Exception as e:
                             st.error(f"Failed to send link: {e}")
@@ -695,10 +803,15 @@ elif st.session_state.show_auth_page:
                 if st.button("Save New Password", use_container_width=True, type="primary"):
                     if not new_password:
                         st.warning("Please enter a new password.")
+                    elif len(new_password) < 6:
+                        st.warning("Password must be at least 6 characters.")
                     else:
                         try:
                             supabase.auth.update_user({"password": new_password})
-                            st.success("✅ Password updated! You can now log in.")
+                            # Drop the one-time recovery session so the next login
+                            # uses the freshly reset password.
+                            supabase.auth.sign_out()
+                            st.success("✅ Password updated! Please log in with your new password.")
                             st.query_params.clear()
                             st.session_state.auth_mode = 'login'
                             st.rerun()
