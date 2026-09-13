@@ -4,6 +4,8 @@ import plotly.express as px
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import json
+from utils.ai_persona import persona_and_currency_note
+from utils.currency import fmt_label, fmt_money, symbol, to_display
 from utils.security import decrypt_data
 from services import recommendation_service
 
@@ -92,9 +94,34 @@ def on_account_view_change():
     """Callback to reset budget planning state when the user selects a new account view."""
     if st.session_state.get('show_budget_planner'):
         st.session_state.show_budget_planner = False
-    
+
     st.session_state.pop("edited_budget_df", None)
     st.session_state.pop("budget_planner_initialized", None)
+
+
+@st.dialog("Delete account")
+def confirm_delete_account(supabase, acc_id, acc_name):
+    """Ask before permanently deleting a bank account."""
+    st.warning(f"Permanently delete the account **{acc_name}**? "
+               "Its balance and linked budgets will be removed from this app.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, delete", type="primary", use_container_width=True):
+        try:
+            supabase.table("accounts").delete().eq("id", acc_id).execute()
+            # If they deleted the account they are currently viewing, switch
+            # back to the combined view and reset budget-planning state.
+            if st.session_state.get("dashboard_account_view_selectbox") == acc_name:
+                st.session_state["dashboard_account_view_selectbox"] = "All Accounts Combined"
+                if st.session_state.get('show_budget_planner'):
+                    st.session_state.show_budget_planner = False
+                st.session_state.pop("edited_budget_df", None)
+                st.session_state.pop("budget_planner_initialized", None)
+        except Exception as e:
+            st.error(f"Failed to delete account: {e}")
+            return  # keep the dialog open so the error is visible
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
 
 
 def render_page(supabase):
@@ -122,22 +149,6 @@ def render_page(supabase):
             on_account_view_change()
         except Exception as e:
             st.error(f"Failed to update primary account: {e}")
-
-    def delete_account_callback(acc_id, acc_name):
-        try:
-            supabase.table("accounts").delete().eq("id", acc_id).execute()
-            st.session_state.pop(f"confirm_del_acc_{acc_id}", None)
-            
-            # If they deleted the account they are currently viewing, switch to "All Accounts"
-            if st.session_state.get("dashboard_account_view_selectbox") == acc_name:
-                st.session_state["dashboard_account_view_selectbox"] = "All Accounts Combined"
-                on_account_view_change()
-        except Exception as e:
-            st.error(f"Failed to delete account: {e}")
-
-    def cancel_delete_callback(acc_id):
-        st.session_state.pop(f"confirm_del_acc_{acc_id}", None)
-
 
     def go_to_scanner():
         st.session_state.force_page = "add_transaction"
@@ -233,9 +244,9 @@ def render_page(supabase):
             net_savings = total_income - total_expense
 
             m1, m2, m3 = st.columns(3)
-            m1.metric("💰 Monthly Income", f"₹{total_income:,.2f}")
-            m2.metric("💸 Monthly Expenses", f"₹{total_expense:,.2f}")
-            m3.metric("🏦 Monthly Net", f"₹{net_savings:,.2f}")
+            m1.metric("💰 Monthly Income", fmt_money(total_income, dp=2))
+            m2.metric("💸 Monthly Expenses", fmt_money(total_expense, dp=2))
+            m3.metric("🏦 Monthly Net", fmt_money(net_savings, dp=2))
 
             # ==========================================
             # 🎯 MONTHLY BUDGET PROGRESS BAR & AI PLANNER
@@ -287,8 +298,8 @@ def render_page(supabase):
                             key="budget_editor_state_key",
                             column_config={
                                 "Category": st.column_config.TextColumn("Category", disabled=True),
-                                "6-Mo Average": st.column_config.NumberColumn("6-Mo Average (₹)", format="₹%d", disabled=True),
-                                "AI Target": st.column_config.NumberColumn("Target Budget (₹)", format="₹%d", min_value=0, step=500)
+                                "6-Mo Average": st.column_config.NumberColumn(fmt_label("6-Mo Average (₹)"), format=f"{symbol()}%d", disabled=True),
+                                "AI Target": st.column_config.NumberColumn(fmt_label("Target Budget (₹)"), format=f"{symbol()}%d", min_value=0, step=500)
                             },
                             hide_index=True, use_container_width=True
                         )
@@ -306,7 +317,7 @@ def render_page(supabase):
                                     st.session_state.custom_cat_budgets[selected_acc_id] = valid_budgets_df[['Category', 'AI Target']].to_dict('records')
                                     
                                     st.session_state.show_budget_planner = False
-                                    st.success(f"Budget saved! Your new limit for {selected_view} is ₹{total_new_budget:,.2f}.")
+                                    st.success(f"Budget saved! Your new limit for {selected_view} is {fmt_money(total_new_budget, dp=2)}.")
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"Failed to update budget: {e}")
@@ -326,16 +337,16 @@ def render_page(supabase):
 
                         if percent_used >= 100:
                             bar_color = "#dc3545" 
-                            st.error(f"⚠️ Exceeded budget by ₹{spent_this_month - monthly_budget:,.2f}!")
+                            st.error(f"⚠️ Exceeded budget by {fmt_money(spent_this_month - monthly_budget, dp=2)}!")
                         elif percent_used >= 85:
                             bar_color = "#ffc107" 
-                            st.warning(f"Careful! Only ₹{monthly_budget - spent_this_month:,.2f} remaining.")
+                            st.warning(f"Careful! Only {fmt_money(monthly_budget - spent_this_month, dp=2)} remaining.")
                         else:
                             bar_color = "#2ecc71" 
                         
                         st.markdown(f"""
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span style="font-weight: bold; color: var(--text-color); opacity: 0.9;">₹{spent_this_month:,.2f} of ₹{monthly_budget:,.2f} spent</span>
+                            <span style="font-weight: bold; color: var(--text-color); opacity: 0.9;">{fmt_money(spent_this_month, dp=2)} of {fmt_money(monthly_budget, dp=2)} spent</span>
                             <span style="color: var(--text-color); opacity: 0.7; font-size: 0.9em;">{percent_used:.1f}% used</span>
                         </div>
                         <div style="background-color: rgba(150, 150, 150, 0.2); border-radius: 8px; height: 12px; width: 100%; margin-bottom: 5px; overflow: hidden;">
@@ -387,7 +398,7 @@ def render_page(supabase):
                             <div style="margin-bottom: 12px;">
                                 <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px;">
                                     <span style="color: var(--text-color); font-weight: 500;">{cat_name}</span>
-                                    <span style="color: var(--text-color); opacity: 0.8;">₹{spent:,.0f} / ₹{target:,.0f}</span>
+                                    <span style="color: var(--text-color); opacity: 0.8;">{fmt_money(spent)} / {fmt_money(target)}</span>
                                 </div>
                                 <div style="background-color: rgba(150, 150, 150, 0.2); border-radius: 4px; height: 6px; width: 100%; overflow: hidden;">
                                     <div style="background-color: {b_color}; height: 100%; width: {capped_pct}%; transition: width 0.5s ease-in-out;"></div>
@@ -431,7 +442,7 @@ def render_page(supabase):
                             <div style='font-size: 0.8rem; color: var(--text-color); opacity: 0.7;'>{date_str} • {row['category']}</div>
                             </div>
                             <div style='text-align: right; color: {amt_color}; font-weight: 700; font-size: 1.05rem;'>
-                            {arrow} ₹{row['amount']:,.2f}
+                            {arrow} {fmt_money(row['amount'], dp=2)}
                             </div>
                             </div>"""
                         html_list += "</div>"
@@ -496,7 +507,7 @@ def render_page(supabase):
                                  barmode='group', color_discrete_map={'Income': '#2ecc71', 'Expense': '#e74c3c'})
                                  
                 fig_bar.update_layout(
-                    margin=dict(t=10, b=10, l=10, r=10), xaxis_title="", yaxis_title="Amount (₹)",
+                    margin=dict(t=10, b=10, l=10, r=10), xaxis_title="", yaxis_title=fmt_label("Amount (₹)"),
                     xaxis=dict(type='category', categoryorder='array', categoryarray=ordered_categories),
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                     font=dict(color=st.get_option("theme.textColor") if st.get_option("theme.textColor") else None))
@@ -519,7 +530,7 @@ def render_page(supabase):
             with cols[index % 4]:
                 is_primary = acc.get('is_primary', False)
                 title = f"🌟 {acc['account_name']}" if is_primary else acc['account_name']
-                st.metric(label=f"{title} ({acc['account_type']})", value=f"₹{acc['balance']:,.2f}")
+                st.metric(label=f"{title} ({acc['account_type']})", value=fmt_money(acc['balance'], dp=2))
                 
                 btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 1.2])
                 
@@ -528,23 +539,12 @@ def render_page(supabase):
                     st.rerun()
                 
                 if btn_col2.button("🗑️", key=f"del_init_{acc['id']}", help="Delete Account"):
-                    st.session_state[f"confirm_del_acc_{acc['id']}"] = True
-                
+                    confirm_delete_account(supabase, acc['id'], acc['account_name'])
+
                 if not is_primary:
                     # ✨ THE FIX: We use on_click here to trigger the callback safely BEFORE the screen evaluates
                     btn_col3.button("Make ⭐", key=f"pri_{acc['id']}", help="Set as Primary",
                                     on_click=make_primary_callback, args=(acc['id'], acc['account_name']))
-
-                if st.session_state.get(f"confirm_del_acc_{acc['id']}", False):
-                    st.error(f"Delete '{acc['account_name']}' account?")
-                    warn_c1, warn_c2 = st.columns(2)
-                    
-                    # ✨ THE FIX: Safely route deletes through callbacks too
-                    warn_c1.button("✅ Yes", key=f"yes_del_{acc['id']}", use_container_width=True, type="primary",
-                                   on_click=delete_account_callback, args=(acc['id'], acc['account_name']))
-                                   
-                    warn_c2.button("❌ No", key=f"no_del_{acc['id']}", use_container_width=True,
-                                   on_click=cancel_delete_callback, args=(acc['id'],))
     else: st.info("No accounts yet.")
 
     st.write("---")
@@ -560,10 +560,10 @@ def render_page(supabase):
             except ValueError: type_index = 0
             
             updated_type = st.selectbox("Account Type", account_types, index=type_index)
-            updated_balance = st.number_input("Balance (₹)", value=float(acc_to_edit['balance']), step=100.0)
-            
+            updated_balance = st.number_input(fmt_label("Balance (₹)"), value=float(acc_to_edit['balance']), step=100.0)
+
             current_budget = float(acc_to_edit.get('monthly_budget') or 0.0)
-            updated_budget = st.number_input("Monthly Budget Limit (₹)", value=current_budget, step=1000.0, help="Set to 0 to disable.")
+            updated_budget = st.number_input(fmt_label("Monthly Budget Limit (₹)"), value=current_budget, step=1000.0, help="Set to 0 to disable.")
             
             c1, c2 = st.columns(2)
             with c1: save_edit = st.form_submit_button("Save Changes", type="primary")
@@ -587,8 +587,8 @@ def render_page(supabase):
             with st.form("add_account_form", clear_on_submit=True):
                 new_acc_name = st.text_input("Account Name (e.g., HDFC Salary, SBI Savings)")
                 new_acc_type = st.selectbox("Account Type", account_types)
-                new_acc_balance = st.number_input("Initial Balance (₹)", min_value=0.0, step=100.0)
-                new_acc_budget = st.number_input("Monthly Budget Limit (₹)", min_value=0.0, step=1000.0, help="Optional. Set a maximum spend limit for this account.")
+                new_acc_balance = st.number_input(fmt_label("Initial Balance (₹)"), min_value=0.0, step=100.0)
+                new_acc_budget = st.number_input(fmt_label("Monthly Budget Limit (₹)"), min_value=0.0, step=1000.0, help="Optional. Set a maximum spend limit for this account.")
                 
                 if st.form_submit_button("Save Account", type="primary"):
                     if new_acc_name:
@@ -607,11 +607,6 @@ def render_page(supabase):
 # ==========================================================================
 #  FINANCIAL CO-PILOT HERO — health score + unified KPIs (Phase 7)
 # ==========================================================================
-def _inr(v):
-    try:
-        return f"₹{float(v):,.0f}"
-    except (TypeError, ValueError):
-        return "₹0"
 
 
 def _render_health_hero(supabase):
@@ -655,10 +650,10 @@ def _render_health_hero(supabase):
 
     c = st.columns(6)
     c[0].metric("🤖 Health Score", f"{hs['overall']}/100", delta=hs["verb"])
-    c[1].metric("🏦 Net Worth", _inr(kpis["net_worth"]))
-    c[2].metric("💸 Monthly Spend", _inr(kpis["monthly_expense"]),
-                f"income {_inr(kpis['monthly_income'])}")
-    c[3].metric("📈 Investments", _inr(kpis["invested_current"]))
+    c[1].metric("🏦 Net Worth", fmt_money(kpis["net_worth"]))
+    c[2].metric("💸 Monthly Spend", fmt_money(kpis["monthly_expense"]),
+                f"income {fmt_money(kpis['monthly_income'])}")
+    c[3].metric("📈 Investments", fmt_money(kpis["invested_current"]))
     c[4].metric("🧾 Tax (eff. rate)",
                 f"{kpis['effective_tax_rate']:.1f}%" if kpis["has_tax_data"] else "—",
                 "record in Tax Planner" if not kpis["has_tax_data"] else None)
@@ -694,15 +689,19 @@ def _render_health_hero(supabase):
                                                  generate_content_safe)
                     genai = get_gemini_client()
                     model = get_generative_model(genai, prefer_flash=True)
+                    _money_kpis = {"net_worth", "monthly_expense", "monthly_income",
+                                   "invested_current", "potential_tax_saving",
+                                   "total_assets", "total_liabilities"}
                     payload = json.dumps({
-                        "kpis": {k: v for k, v in kpis.items()},
+                        "kpis": {k: (to_display(v) if k in _money_kpis else v)
+                                 for k, v in kpis.items()},
                         "flags": hs["flags"],
                         "components": [{k: v for k, v in comp.items()
                                         if k in ("label", "score", "weight")}
                                        for comp in hs["components"]],
                     }, default=str)
-                    ai = generate_content_safe(model, (
-                        "You are FinGuru's copilot. Summarise this user's Financial "
+                    ai = generate_content_safe(model, persona_and_currency_note() + (
+                        "\n\nYou are FinGuru's copilot. Summarise this user's Financial "
                         "Health Score, name the two most actionable improvements, and "
                         "keep it under 120 words. Ground everything ONLY in this "
                         "data:\n\n" + payload), max_retries=1)

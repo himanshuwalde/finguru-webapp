@@ -11,6 +11,7 @@ import pandas as pd
 
 from engines import tax_engine
 from services.tax_service import get_tax_service
+from utils.currency import fmt_label, fmt_money, fmt_input_label, to_inr
 from utils.ui_components import render_gradient_header, render_alert_banner
 
 
@@ -62,10 +63,10 @@ def render_page(supabase):
     c1, c2, c3 = st.columns(3)
     income_vals = {}
     income_ui = {
-        "salary": "Annual Salary (₹)", "bonus": "Bonus (₹)",
-        "interest_income": "Interest Income (₹)", "rental_income": "Rental Income (₹)",
-        "ltcg": "LTCG ₹ (equity)", "stcg": "STCG ₹ (equity)",
-        "other_income": "Other Income ₹",
+        "salary": fmt_input_label("Annual Salary"), "bonus": fmt_input_label("Bonus"),
+        "interest_income": fmt_input_label("Interest Income"), "rental_income": fmt_input_label("Rental Income"),
+        "ltcg": fmt_input_label("LTCG (equity)"), "stcg": fmt_input_label("STCG (equity)"),
+        "other_income": fmt_input_label("Other Income"),
     }
     labels = list(income_ui.values())
     for i, k in enumerate(_income_keys()):
@@ -82,12 +83,12 @@ def render_page(supabase):
     c1, c2, c3 = st.columns(3)
     deduction_vals = {}
     ded_ui = {
-        "sec_80c": "80C — ELSS/PPF/Life (max ₹1.5L)",
-        "sec_80d_self": "80D — Health Insurance self (max ₹25k)",
-        "sec_80ccd_1b": "80CCD(1B) — NPS extra (max ₹50k)",
-        "sec_80g": "80G — Donations (₹)",
+        "sec_80c": fmt_input_label("80C — ELSS/PPF/Life (max 1.5L)"),
+        "sec_80d_self": fmt_input_label("80D — Health Insurance self (max 25k)"),
+        "sec_80ccd_1b": fmt_input_label("80CCD(1B) — NPS extra (max 50k)"),
+        "sec_80g": fmt_input_label("80G — Donations"),
         "nps_employer": "NPS Employer 80CCD(2) (both regimes)",
-        "home_loan_interest": "Home Loan Interest ₹ (Sec 24b)",
+        "home_loan_interest": fmt_input_label("Home Loan Interest (Sec 24b)"),
     }
     for i, k in enumerate(_deduction_keys()):
         col = [c1, c2, c3][i % 3]
@@ -103,7 +104,7 @@ def render_page(supabase):
                                      key="tax_ded_parents_senior")
         deduction_vals["80d_parents_senior"] = parents_senior
         deduction_vals["sec_80d_parents"] = st.number_input(
-            "80D — Parents' Health Premium (₹)",
+            fmt_input_label("80D — Parents' Health Premium"),
             0.0, 1e6, float(ded.get("sec_80d_parents", 0) or 0),
             key="tax_ded_80d_parents")
 
@@ -111,15 +112,15 @@ def render_page(supabase):
     c1, c2, c3 = st.columns(3)
     hra = ded
     with c1:
-        hra_basic = st.number_input("Basic Salary / year (₹)", 0.0, 1e8,
+        hra_basic = st.number_input(fmt_input_label("Basic Salary / year"), 0.0, 1e8,
                                     float(hra.get("hra_basic_salary", 0) or 0),
                                     key="tax_hra_basic")
     with c2:
-        hra_recv = st.number_input("HRA received / year (₹)", 0.0, 1e8,
+        hra_recv = st.number_input(fmt_input_label("HRA received / year"), 0.0, 1e8,
                                    float(hra.get("hra_received", 0) or 0),
                                    key="tax_hra_recv")
     with c3:
-        rent = st.number_input("Annual Rent Paid (₹)", 0.0, 1e8,
+        rent = st.number_input(fmt_input_label("Annual Rent Paid"), 0.0, 1e8,
                                float(hra.get("hra_rent_paid", 0) or 0),
                                key="tax_hra_rent")
     metro = st.checkbox("Metro city (Delhi/Mumbai/Chennai/Kolkata)", key="tax_hra_metro",
@@ -131,23 +132,24 @@ def render_page(supabase):
                                 key="tax_compute")
 
     if compute_clicked:
+        # Convert all input amounts to INR for storage
         inputs = {
             "age": int(age),
             "financial_year": fy,
             "residential_status": status,
-            "income": {k: float(v or 0) for k, v in income_vals.items()},
+            "income": {k: to_inr(float(v or 0)) for k, v in income_vals.items()},
             "deductions": {
-                "sec_80c": float(deduction_vals["sec_80c"] or 0),
-                "sec_80d_self": float(deduction_vals["sec_80d_self"] or 0),
-                "sec_80d_parents": float(deduction_vals["sec_80d_parents"] or 0),
+                "sec_80c": to_inr(float(deduction_vals["sec_80c"] or 0)),
+                "sec_80d_self": to_inr(float(deduction_vals["sec_80d_self"] or 0)),
+                "sec_80d_parents": to_inr(float(deduction_vals["sec_80d_parents"] or 0)),
                 "80d_parents_senior": bool(parents_senior),
-                "sec_80ccd_1b": float(deduction_vals["sec_80ccd_1b"] or 0),
-                "sec_80g": float(deduction_vals["sec_80g"] or 0),
-                "nps_employer": float(deduction_vals["nps_employer"] or 0),
-                "home_loan_interest": float(deduction_vals["home_loan_interest"] or 0),
-                "hra_basic_salary": float(hra_basic or 0),
-                "hra_received": float(hra_recv or 0),
-                "hra_rent_paid": float(rent or 0),
+                "sec_80ccd_1b": to_inr(float(deduction_vals["sec_80ccd_1b"] or 0)),
+                "sec_80g": to_inr(float(deduction_vals["sec_80g"] or 0)),
+                "nps_employer": to_inr(float(deduction_vals["nps_employer"] or 0)),
+                "home_loan_interest": to_inr(float(deduction_vals["home_loan_interest"] or 0)),
+                "hra_basic_salary": to_inr(float(hra_basic or 0)),
+                "hra_received": to_inr(float(hra_recv or 0)),
+                "hra_rent_paid": to_inr(float(rent or 0)),
                 "hra_is_metro": bool(metro),
             },
         }
@@ -162,8 +164,7 @@ def render_page(supabase):
         _render_result(st.session_state.tax_result, svc)
 
 
-def _fmt(v: float) -> str:
-    return f"₹{v:,.0f}"
+_fmt = fmt_money
 
 
 def _render_result(result: dict, svc):
@@ -184,7 +185,7 @@ def _render_result(result: dict, svc):
         "**Final Tax**": [old["total_tax"], new["total_tax"]],
     }
     df = pd.DataFrame(rows).T.reset_index()
-    df.columns = ["Line item", "Old Regime (₹)", "New Regime (₹)"]
+    df.columns = ["Line item", fmt_label("Old Regime (₹)"), fmt_label("New Regime (₹)")]
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     rec = result["recommended_regime"]

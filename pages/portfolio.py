@@ -14,13 +14,23 @@ import streamlit as st
 
 from engines import portfolio_engine
 from services.portfolio_service import get_portfolio_service
+from utils.currency import fmt_label, fmt_money
 from utils.ui_components import render_gradient_header, render_alert_banner
 
 ASSET_TYPES = ["Stock", "Mutual Fund", "FD", "Gold", "Property", "Other"]
 
 
-def _inr(v) -> str:
-    return f"₹{v:,.0f}"
+@st.dialog("Delete investment")
+def confirm_delete_stock(svc, name, inv_id):
+    """Ask before permanently deleting a holding from the portfolio."""
+    st.warning(f"Permanently delete **{name}** from your portfolio? "
+               "This cannot be undone.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, delete", type="primary", use_container_width=True):
+        svc.delete_investment(inv_id)
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
 
 
 def render_page(supabase):
@@ -49,16 +59,16 @@ def render_page(supabase):
         if asset_type == "Stock":
             c1, c2, c3 = st.columns(3)
             common["quantity"] = c1.number_input("Quantity", 0.0, 1e6, 1.0, key="pf_qty")
-            common["buy_price"] = c2.number_input("Buy price (₹)", 0.0, 1e8, 0.0, key="pf_buy")
-            common["current_price"] = c3.number_input("Current price (₹)", 0.0, 1e8, 0.0, key="pf_cp")
+            common["buy_price"] = c2.number_input(fmt_label("Buy price (₹)"), 0.0, 1e8, 0.0, key="pf_buy")
+            common["current_price"] = c3.number_input(fmt_label("Current price (₹)"), 0.0, 1e8, 0.0, key="pf_cp")
         elif asset_type == "Mutual Fund":
             c1, c2, c3 = st.columns(3)
             common["units"] = c1.number_input("Units", 0.0, 1e8, 0.0, key="pf_units")
-            common["purchase_nav"] = c2.number_input("Purchase NAV (₹)", 0.0, 1e5, 0.0, key="pf_pnav")
-            common["current_nav"] = c3.number_input("Current NAV (₹)", 0.0, 1e5, 0.0, key="pf_cnav")
+            common["purchase_nav"] = c2.number_input(fmt_label("Purchase NAV (₹)"), 0.0, 1e5, 0.0, key="pf_pnav")
+            common["current_nav"] = c3.number_input(fmt_label("Current NAV (₹)"), 0.0, 1e5, 0.0, key="pf_cnav")
         elif asset_type == "FD":
             c1, c2, c3 = st.columns(3)
-            common["principal"] = c1.number_input("Principal (₹)", 0.0, 1e9, 0.0, key="pf_princ")
+            common["principal"] = c1.number_input(fmt_label("Principal (₹)"), 0.0, 1e9, 0.0, key="pf_princ")
             common["interest_rate"] = c2.number_input("Interest rate (% p.a.)", 0.0, 20.0, 7.0, key="pf_rate")
             c3.write("")
             common["start_date"] = c3.date_input("Start date", value=date(2024, 1, 1), key="pf_std")
@@ -66,8 +76,8 @@ def render_page(supabase):
                 "Maturity date (optional)", value=None, key="pf_mtd")
         elif asset_type in ("Gold", "Property", "Other"):
             c1, c2 = st.columns(2)
-            common["invested_amount"] = c1.number_input("Invested amount (₹)", 0.0, 1e9, 0.0, key="pf_inv")
-            common["current_value"] = c2.number_input("Current value (₹)", 0.0, 1e9, 0.0, key="pf_cv")
+            common["invested_amount"] = c1.number_input(fmt_label("Invested amount (₹)"), 0.0, 1e9, 0.0, key="pf_inv")
+            common["current_value"] = c2.number_input(fmt_label("Current value (₹)"), 0.0, 1e9, 0.0, key="pf_cv")
         common["purchased_on"] = st.date_input("Purchase date",
                                                value=date.today(), key="pf_date")
         common["notes"] = st.text_input("Notes (optional)", key="pf_notes")
@@ -97,9 +107,9 @@ def render_page(supabase):
         return
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Invested", _inr(summary["total_invested"]))
-    c2.metric("Current Value", _inr(summary["total_current"]))
-    c3.metric("Returns", _inr(summary["absolute_return"]),
+    c1.metric("Invested", fmt_money(summary["total_invested"]))
+    c2.metric("Current Value", fmt_money(summary["total_current"]))
+    c3.metric("Returns", fmt_money(summary["absolute_return"]),
               f"{summary['return_pct']:+.1f}%")
     c4.metric("Portfolio XIRR", f"{summary['xirr_pct']:.1f}%")
     c5.metric("As of", summary["as_of"])
@@ -122,8 +132,8 @@ def render_page(supabase):
     with right:
         st.markdown("##### Holdings")
         rows = [{"Name": h["name"], "Type": h["asset_type"],
-                 "Invested": _inr(h["invested_amount"]),
-                 "Current": _inr(h["current_value"]),
+                 "Invested": fmt_money(h["invested_amount"]),
+                 "Current": fmt_money(h["current_value"]),
                  "Return": f"{h['return_pct']:+.1f}%",
                  "Date": h["date"] or "—"} for h in summary["holdings"]]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
@@ -144,7 +154,7 @@ def render_page(supabase):
     for h in summary["holdings"]:
         row = st.columns([4, 4, 2])
         row[0].markdown(f"**{h['name']}**   ·   {h['asset_type']}")
-        row[1].markdown(f"{_inr(h['invested_amount'])} → {_inr(h['current_value'])}")
+        row[1].markdown(f"{fmt_money(h['invested_amount'])} → {fmt_money(h['current_value'])}")
         inv_id = None
         # find the real row id for a robust delete (match by name+amount)
         for raw in svc.get_investments(user_id):
@@ -152,5 +162,4 @@ def render_page(supabase):
                 inv_id = raw["id"]
                 break
         if inv_id and row[2].button("Delete", key=f"del_{inv_id}"):
-            svc.delete_investment(inv_id)
-            st.rerun()
+            confirm_delete_stock(svc, h["name"], inv_id)

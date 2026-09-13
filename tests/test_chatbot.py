@@ -79,7 +79,11 @@ def test_grounding_serializes_to_valid_json():
     results = run_tools(FAKE, "user-1", ["net_worth", "fire_status"])
     blob = serialize_results(results)
     parsed = json.loads(blob)
-    assert set(parsed.keys()) == {"net_worth", "fire_status"}
+    # Tool results + the currency/persona `settings` block the model needs.
+    assert {"net_worth", "fire_status"} <= set(parsed.keys())
+    assert "settings" in parsed
+    assert parsed["settings"]["currency"] == "INR"  # default offline currency
+    assert parsed["settings"]["symbol"] == "₹"
 
 
 # ------------------------------------------------------- offline conversation

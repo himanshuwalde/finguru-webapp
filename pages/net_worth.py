@@ -12,13 +12,23 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from services.networth_service import get_networth_service
+from utils.currency import fmt_label, fmt_money, symbol
 from utils.ui_components import render_gradient_header, render_alert_banner
 
 LIABILITY_TYPES = ["Home", "Education", "Car", "Credit Card", "Personal", "Other"]
 
 
-def _inr(v) -> str:
-    return f"₹{v:,.0f}"
+@st.dialog("Delete liability")
+def confirm_delete_liability(svc, name, liability_id):
+    """Ask before permanently removing a debt / liability."""
+    st.warning(f"Permanently delete **{name}** from your liabilities? "
+               "This cannot be undone.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, delete", type="primary", use_container_width=True):
+        svc.delete_liability(liability_id)
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
 
 
 def render_page(supabase):
@@ -42,7 +52,7 @@ def render_page(supabase):
             name = st.text_input("Name / lender", placeholder="e.g. HDFC Home Loan", key="nw_name")
         with c3:
             rate = st.number_input("Interest rate (% p.a.)", 0.0, 40.0, 0.0, key="nw_rate")
-        amount = st.number_input("Outstanding amount (₹)", 0.0, 1e9, 0.0, key="nw_amount")
+        amount = st.number_input(fmt_label("Outstanding amount (₹)"), 0.0, 1e9, 0.0, key="nw_amount")
 
         if st.button("Save liability", type="primary", use_container_width=True):
             if not name.strip():
@@ -67,17 +77,17 @@ def render_page(supabase):
     net = svc.compute_networth(user_id)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Net Worth", _inr(net["net_worth"]),
-              f"Liabilities {_inr(net['total_liabilities'])}")
-    c2.metric("Total Assets", _inr(net["total_assets"]))
-    c3.metric("Bank & Cash", _inr(net["liquid_assets"]))
-    c4.metric("Investments", _inr(net["investments_total"]))
+    c1.metric("Net Worth", fmt_money(net["net_worth"]),
+              f"Liabilities {fmt_money(net['total_liabilities'])}")
+    c2.metric("Total Assets", fmt_money(net["total_assets"]))
+    c3.metric("Bank & Cash", fmt_money(net["liquid_assets"]))
+    c4.metric("Investments", fmt_money(net["investments_total"]))
 
     st.write("---")
     left, right = st.columns([1, 1])
     with left:
         st.markdown("##### Assets")
-        rows = [{"Asset": a["name"], "Type": a["category"], "Value": _inr(a["amount"])}
+        rows = [{"Asset": a["name"], "Type": a["category"], "Value": fmt_money(a["amount"])}
                 for a in net["assets_breakdown"]]
         if not rows:
             render_alert_banner("No assets yet — add a budget account in the "
@@ -88,7 +98,7 @@ def render_page(supabase):
     with right:
         st.markdown("##### Liabilities")
         lrows = [{"Liability": l["name"], "Type": l["type"],
-                  "Outstanding": _inr(l["outstanding_amount"])}
+                  "Outstanding": fmt_money(l["outstanding_amount"])}
                  for l in net["liabilities_breakdown"]]
         if not lrows:
             render_alert_banner("No liabilities recorded 🎉", "success")
@@ -100,13 +110,12 @@ def render_page(supabase):
         for lrow in net["liabilities_breakdown"]:
             col = st.columns([4, 4, 2])
             col[0].markdown(f"**{lrow['name']}**   ·   {lrow['type']}")
-            col[1].markdown(_inr(lrow["outstanding_amount"]))
+            col[1].markdown(fmt_money(lrow["outstanding_amount"]))
             raw_id = next((r["id"] for r in svc.get_liabilities(user_id)
                            if r["name"] == lrow["name"]
                            and float(r["outstanding_amount"]) == lrow["outstanding_amount"]), None)
             if raw_id and col[2].button("Delete", key=f"nw_del_{raw_id}"):
-                svc.delete_liability(raw_id)
-                st.rerun()
+                confirm_delete_liability(svc, lrow["name"], raw_id)
 
     # ------------------------------------------------------------- growth chart
     st.write("---")
@@ -137,8 +146,8 @@ def render_page(supabase):
                               paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                               legend=dict(orientation="h", yanchor="bottom", y=1.02))
             fig.update_xaxes(title_text="")
-            fig.update_yaxes(title_text="₹", secondary_y=False)
-            fig.update_yaxes(title_text="Liabilities (₹)", secondary_y=True)
+            fig.update_yaxes(title_text=f"Amount ({symbol()})", secondary_y=False)
+            fig.update_yaxes(title_text=f"Liabilities ({symbol()})", secondary_y=True)
             st.plotly_chart(fig, use_container_width=True, key="nw_growth")
         else:
             render_alert_banner(

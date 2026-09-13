@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime
 import plotly.graph_objects as go
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
+from utils.ai_persona import persona_and_currency_note
+from utils.currency import fmt_label, fmt_money
 
 # Initialize AI client
 genai_client = get_gemini_client()
@@ -19,9 +21,9 @@ def calculate_probability(target, current, monthly_contrib, months_left):
 def edit_goal_dialog(goal, supabase):
     with st.form(f"edit_form_{goal['id']}"):
         g_name = st.text_input("Goal Name", value=goal['goal_name'])
-        g_target = st.number_input("Target Amount (₹)", min_value=1000, step=5000, value=int(goal['target_amount']))
-        g_saved = st.number_input("Already Saved (₹)", min_value=0, step=1000, value=int(goal['current_saved']))
-        g_monthly = st.number_input("Monthly Contribution (₹)", min_value=0, step=500, value=int(goal['monthly_contribution']))
+        g_target = st.number_input(fmt_label("Target Amount (₹)"), min_value=1000, step=5000, value=int(goal['target_amount']))
+        g_saved = st.number_input(fmt_label("Already Saved (₹)"), min_value=0, step=1000, value=int(goal['current_saved']))
+        g_monthly = st.number_input(fmt_label("Monthly Contribution (₹)"), min_value=0, step=500, value=int(goal['monthly_contribution']))
         
         existing_date = datetime.strptime(goal['target_date'], "%Y-%m-%d").date()
         g_date = st.date_input("Target Date", value=existing_date)
@@ -48,9 +50,21 @@ def show_virtual_card(item, price):
         c1, c2 = st.columns(2)
         c1.markdown("**EXP:** 05/29")
         c2.markdown("**CVV:** 991")
-        st.caption(f"Spending Limit Locked to: ₹{price:,.2f}")
+        st.caption(f"Spending Limit Locked to: {fmt_money(price, dp=2)}")
     
     st.warning("This card will expire automatically in 30 minutes.")
+
+@st.dialog("Delete goal")
+def delete_goal_dialog(goal, supabase):
+    """Ask before permanently deleting a savings goal."""
+    st.warning(f"Permanently delete the goal **{goal['goal_name']}**? "
+               "This cannot be undone.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, delete", type="primary", use_container_width=True):
+        supabase.table("goals").delete().eq("id", goal['id']).execute()
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
 
 def render_page(supabase):
     # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags
@@ -97,7 +111,7 @@ def render_page(supabase):
                 progress = min(goal['current_saved'] / goal['target_amount'], 1.0)
                 st.markdown(f"**{goal['goal_name']}**")
                 st.progress(progress)
-                st.caption(f"₹{goal['current_saved']:,.0f} / ₹{goal['target_amount']:,.0f} by {goal['target_date']}")
+                st.caption(f"{fmt_money(goal['current_saved'])} / {fmt_money(goal['target_amount'])} by {goal['target_date']}")
                 
                 with st.expander("⚙️ Manage Goal"):
                     mc1, mc2 = st.columns(2)
@@ -105,26 +119,15 @@ def render_page(supabase):
                         edit_goal_dialog(goal, supabase)
                     
                     if mc2.button("❌ Delete", key=f"del_init_{goal['id']}", use_container_width=True):
-                        st.session_state[f"confirm_del_goal_{goal['id']}"] = True
-                        
-                    if st.session_state.get(f"confirm_del_goal_{goal['id']}", False):
-                        st.error("Delete this goal permanently?")
-                        wc1, wc2 = st.columns(2)
-                        if wc1.button("✅ Yes", key=f"yes_del_{goal['id']}", type="primary", use_container_width=True):
-                            supabase.table("goals").delete().eq("id", goal['id']).execute()
-                            st.session_state.pop(f"confirm_del_goal_{goal['id']}", None)
-                            st.rerun()
-                        if wc2.button("❌ Cancel", key=f"no_del_{goal['id']}", use_container_width=True):
-                            st.session_state.pop(f"confirm_del_goal_{goal['id']}", None)
-                            st.rerun()
+                        delete_goal_dialog(goal, supabase)
                 st.write("")
                 
         with st.expander("➕ Create New Goal"):
             with st.form("new_goal_form", clear_on_submit=True):
                 g_name = st.text_input("Goal Name (e.g., Europe Trip 2026)")
-                g_target = st.number_input("Target Amount (₹)", min_value=1000, step=5000)
-                g_saved = st.number_input("Already Saved (₹)", min_value=0, step=1000)
-                g_monthly = st.number_input("Monthly Contribution (₹)", min_value=0, step=500)
+                g_target = st.number_input(fmt_label("Target Amount (₹)"), min_value=1000, step=5000)
+                g_saved = st.number_input(fmt_label("Already Saved (₹)"), min_value=0, step=1000)
+                g_monthly = st.number_input(fmt_label("Monthly Contribution (₹)"), min_value=0, step=500)
                 g_date = st.date_input("Target Date", min_value=datetime.today())
                 
                 if st.form_submit_button("Save Goal", type="primary"):
@@ -166,7 +169,7 @@ def render_page(supabase):
                 
                 live_price = latest_request.get('product_price', 0.0)
                 if live_price is None: live_price = 0.0
-                final_price = st.number_input("Confirmed Item Price (₹)", min_value=0.0, step=100.0, value=float(live_price))
+                final_price = st.number_input(fmt_label("Confirmed Item Price (₹)"), min_value=0.0, step=100.0, value=float(live_price))
                 
                 if goals:
                     impact_goal = st.selectbox("Anchor Goal", [g['goal_name'] for g in goals])
@@ -224,7 +227,10 @@ def render_page(supabase):
                 try:
                     target_model = get_best_model(genai_client, prefer_flash=True)
                     model = genai_client.GenerativeModel(target_model)
-                    prompt = f"Analyze: Spending ₹{final_price} on product from {product_url}. Goal: {target_goal['goal_name']}. Probability drops from {base_prob}% to {new_prob}%. Give a short, brutal financial reality check."
+                    prompt = (f"{persona_and_currency_note()}\n\n"
+                  f"Analyze: Spending {fmt_money(final_price)} on product from {product_url}. "
+                  f"Goal: {target_goal['goal_name']}. Probability drops from {base_prob}% to "
+                  f"{new_prob}%. Give a short, brutal financial reality check.")
 
                     response_text = generate_content_safe(model, prompt)
 

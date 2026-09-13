@@ -6,6 +6,7 @@ import joblib
 import os
 import xgboost as xgb
 from utils.security import decrypt_data
+from utils.currency import fmt_label, fmt_money, fmt_input_label, to_inr
 
 # Cache the ML model so it only loads into memory once when the app starts!
 @st.cache_resource
@@ -174,32 +175,36 @@ def render_page(supabase):
         
         with c1:
             loan_type = st.selectbox("Loan Type", ["Home Loan", "Personal Loan", "Vehicle Loan", "Gold Loan", "Business Loan", "Consumer Durable Loan", "Credit Card Loan"])
-            loan_amount = st.number_input("Desired Loan Amount (₹)", min_value=10000, max_value=50000000, value=500000, step=50000)
+            loan_amount = st.number_input(fmt_input_label("Desired Loan Amount"), min_value=10000, max_value=50000000, value=500000, step=50000)
             tenure_years = st.slider("Loan Tenure (Years)", 1, 30, 5)
 
         with c2:
-            monthly_income = st.number_input("Monthly Income (₹)", min_value=5000, value=50000, step=5000)
-            existing_emis = st.number_input("Existing Monthly EMIs (₹)", min_value=0, value=0, step=1000)
+            monthly_income = st.number_input(fmt_input_label("Monthly Income"), min_value=5000, value=50000, step=5000)
+            existing_emis = st.number_input(fmt_input_label("Existing Monthly EMIs"), min_value=0, value=0, step=1000)
             cibil_score = st.number_input("CIBIL Score (Optional)", min_value=0, max_value=900, value=0, step=1)
 
         if st.button("Predict Approval Probability", type="primary", use_container_width=True):
-            
+            # Convert inputs from user's display currency to INR for calculations
+            loan_inr = to_inr(loan_amount)
+            income_inr = to_inr(monthly_income)
+            emis_inr = to_inr(existing_emis)
+
             # --- REAL WORLD FINANCIAL MATH UPDATE ---
             rates = {"Home Loan": 8.5, "Vehicle Loan": 9.5, "Gold Loan": 10.0, "Consumer Durable Loan": 12.0, "Personal Loan": 14.0, "Business Loan": 16.0, "Credit Card Loan": 36.0}
             is_secured = loan_type in ["Home Loan", "Vehicle Loan", "Gold Loan"]
-            
+
             annual_rate = rates.get(loan_type, 12.0)
             monthly_rate = (annual_rate / 100) / 12
             n_months = tenure_years * 12
 
             # Calculate Standard EMI
             if monthly_rate > 0:
-                emi = (loan_amount * monthly_rate * ((1 + monthly_rate)**n_months)) / (((1 + monthly_rate)**n_months) - 1)
+                emi = (loan_inr * monthly_rate * ((1 + monthly_rate)**n_months)) / (((1 + monthly_rate)**n_months) - 1)
             else:
-                emi = loan_amount / n_months
+                emi = loan_inr / n_months
 
             # Calculate Fixed Obligation to Income Ratio (FOIR)
-            foir = (emi + existing_emis) / monthly_income if monthly_income > 0 else 1.0
+            foir = (emi + emis_inr) / income_inr if income_inr > 0 else 1.0
 
             # 1. EFFECTIVE SCORE LOGIC
             if cibil_score == 0 or cibil_score == -1:
@@ -243,7 +248,7 @@ def render_page(supabase):
 
             st.write("---")
             res_c1, res_c2, res_c3 = st.columns(3)
-            res_c1.metric(label="Estimated EMI", value=f"₹{emi:,.0f}/mo")
+            res_c1.metric(label="Estimated EMI", value=f"{fmt_money(emi)}/mo")
             res_c2.metric(label="Effective AI Score", value=f"{int(effective_score)}")
             
             # Color code the FOIR metric for better UX

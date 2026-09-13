@@ -4,6 +4,8 @@ from datetime import datetime
 import calendar
 from supabase import create_client, Client
 import google.generativeai as genai
+from utils.ai_persona import persona_and_currency_note
+from utils.currency import to_display
 from utils.email_engine import send_financial_alert
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
@@ -29,8 +31,15 @@ def generate_ai_email_content(user_name, account_name, alert_type, budget_data, 
     genai_client = _get_genai_client() or get_gemini_client()
     target_model = get_best_model(genai_client, prefer_flash=True)
     model = genai_client.GenerativeModel(target_model)
-    
-    prompt = f"""
+
+    # Amounts are stored in INR — re-express in the user's display currency
+    # (identity when INR / running headless outside a session).
+    _money_keys = {"Budget", "Spent", "Remaining", "Income", "Net"}
+    budget_data = {k: (to_display(v) if isinstance(v, (int, float)) and k in _money_keys else v)
+                   for k, v in (budget_data or {}).items()}
+    category_data = {k: to_display(v) for k, v in (category_data or {}).items()}
+
+    prompt = f"""{persona_and_currency_note()}
     You are an expert, empathetic AI Financial Advisor for {user_name}.
     You are reporting specifically on their bank account named: "{account_name}".
     

@@ -4,6 +4,7 @@ Centralizes common Streamlit UI patterns to avoid duplication.
 """
 import streamlit as st
 from typing import Optional, List, Dict, Any
+from utils.currency import fmt_money
 
 
 def render_gradient_header(icon: str, title: str, subtitle: str,
@@ -174,7 +175,7 @@ def render_category_progress_bars(categories: List[Dict], title: str = "Category
             <div style="margin-bottom: 12px;">
                 <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px;">
                     <span style="color: var(--text-color); font-weight: 500;">{name}</span>
-                    <span style="color: var(--text-color); opacity: 0.8;">₹{spent:,.0f} / ₹{target:,.0f}</span>
+                    <span style="color: var(--text-color); opacity: 0.8;">{fmt_money(spent)} / {fmt_money(target)}</span>
                 </div>
                 <div style="background-color: rgba(150, 150, 150, 0.2); border-radius: 4px; height: 6px; width: 100%; overflow: hidden;">
                     <div style="background-color: {color}; height: 100%; width: {capped_pct}%; transition: width 0.5s ease-in-out;"></div>
@@ -212,7 +213,7 @@ def render_transaction_row(row: Dict, show_account: bool = False) -> str:
             <div style='font-size: 0.8rem; color: var(--text-color); opacity: 0.7;'>{date_str} • {row['category']}{account_html}</div>
         </div>
         <div style='text-align: right; color: {amt_color}; font-weight: 700; font-size: 1.05rem;'>
-            {arrow} ₹{row['amount']:,.2f}
+            {arrow} {fmt_money(row['amount'], dp=2)}
         </div>
     </div>"""
 

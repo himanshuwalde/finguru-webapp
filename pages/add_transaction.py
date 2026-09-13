@@ -5,6 +5,7 @@ import json
 import re
 import pandas as pd
 from utils.security import encrypt_data
+from utils.currency import fmt_label, fmt_money, to_inr
 from utils.anomaly_engine import check_and_alert_anomaly
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
@@ -159,7 +160,7 @@ def render_page(supabase):
         
         with col1:
             st.selectbox("Type", ["Expense", "Income"], key="trans_type")
-            amount = st.number_input("Amount (₹)", min_value=0.0, step=10.0, key="trans_amount")
+            amount = st.number_input(fmt_input_label("Amount"), min_value=0.0, step=10.0, key="trans_amount")
             date = st.date_input("When? (Date)", key="trans_date")
             st.write("") 
             is_recurring = st.toggle("🔁 Monthly Recurring", key="trans_recurring")
@@ -210,15 +211,16 @@ def render_page(supabase):
                         transaction_data = {
                             "user_id": st.session_state.user_id,
                             "account_id": account_dict[account_name],
-                            "amount": float(amount),
+                            "amount": to_inr(amount),  # Convert to INR for storage
                             "type": st.session_state.trans_type,
                             "category": category,
                             "description": encrypt_data(description),
                             "transaction_time": str(final_datetime),
-                            "is_recurring": is_recurring 
+                            "is_recurring": is_recurring
                         }
-                        
-                        new_amount = float(amount)
+
+                        # Amount for balance calculation (already converted to INR)
+                        new_amount = to_inr(amount)
                         
                         if is_editing:
                             trans_id_to_update = editing_data['id']
@@ -280,7 +282,7 @@ def render_page(supabase):
                                         account_name=account_name
                                     )
 
-                            st.success(f"Successfully logged {st.session_state.trans_type} of ₹{amount}!")
+                            st.success(f"Successfully logged {st.session_state.trans_type} of {fmt_money(amount, dp=2)}!")
                             
                             keys_to_clear = ['trans_amount', 'trans_desc', 'trans_date', 'trans_category', 'trans_type', 'trans_recurring']
                             for key in keys_to_clear:

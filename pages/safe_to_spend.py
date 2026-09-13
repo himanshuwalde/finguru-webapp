@@ -6,6 +6,7 @@ import calendar
 import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
 from utils.security import decrypt_data
+from utils.currency import fmt_money
 
 def predict_upcoming_bills(df, current_date):
     """
@@ -149,10 +150,10 @@ def render_page(supabase):
         
         if monthly_budget == 0:
             st.warning("⚠️ No Monthly Budget set. Please configure a budget in your Dashboard.")
-            st.markdown("<h1 style='color: gray; font-size: 4rem;'>₹0</h1>", unsafe_allow_html=True)
+            st.markdown(f"<h1 style='color: gray; font-size: 4rem;'>{fmt_money(0)}</h1>", unsafe_allow_html=True)
         else:
             color = "#2ECC71" if daily_safe_spend >= spending_velocity else "#E74C3C"
-            st.markdown(f"<h1 style='color: {color}; font-size: 4rem; text-shadow: 0 2px 15px {color}33;'>₹{daily_safe_spend:,.0f}</h1>", unsafe_allow_html=True)
+            st.markdown(f"<h1 style='color: {color}; font-size: 4rem; text-shadow: 0 2px 15px {color}33;'>{fmt_money(daily_safe_spend)}</h1>", unsafe_allow_html=True)
             
             if daily_safe_spend < spending_velocity:
                 st.error(f"⚠️ **Velocity Warning:** Slow down! You are overspending your daily limit.")
@@ -162,11 +163,11 @@ def render_page(supabase):
     with col_sub:
         with st.container(border=True):
             st.markdown(f"#### Budget Breakdown ({account_name})")
-            st.markdown(f"**Monthly Limit:** ₹{monthly_budget:,.2f}")
-            st.markdown(f"**Spent So Far:** -₹{spent_so_far:,.2f}")
-            st.markdown(f"**Forecasted Bills:** -₹{total_upcoming_liabilities:,.2f}")
+            st.markdown(f"**Monthly Limit:** {fmt_money(monthly_budget, dp=2)}")
+            st.markdown(f"**Spent So Far:** -{fmt_money(spent_so_far, dp=2)}")
+            st.markdown(f"**Forecasted Bills:** -{fmt_money(total_upcoming_liabilities, dp=2)}")
             st.markdown("---")
-            st.markdown(f"**Safe Remaining:** ₹{true_liquidity:,.2f}")
+            st.markdown(f"**Safe Remaining:** {fmt_money(true_liquidity, dp=2)}")
 
     st.write("---")
     c1, c2 = st.columns([1.5, 1])
@@ -227,7 +228,7 @@ def render_page(supabase):
                 html += f"<div style='background: rgba(231, 76, 60, 0.1); padding: 12px; border-left: 4px solid #e74c3c; border-radius: 4px;'>"
                 html += f"<div style='display:flex; justify-content:space-between; font-weight:bold; color: var(--text-color);'>"
                 html += f"<span>{desc}</span>"
-                html += f"<span style='color:#e74c3c;'>₹{row['predicted_amount']:,.0f}</span>"
+                html += f"<span style='color:#e74c3c;'>{fmt_money(row['predicted_amount'])}</span>"
                 html += f"</div>"
                 html += f"<div style='font-size:0.85em; color: var(--text-color); opacity: 0.7;'>Due approx: {date_str}</div>"
                 html += f"</div>"

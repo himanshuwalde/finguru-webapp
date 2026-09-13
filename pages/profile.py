@@ -1,7 +1,34 @@
 import streamlit as st
 import json
 from datetime import datetime
+from utils.currency import CURRENCIES, symbol
 from utils.security import decrypt_data
+from utils.user_settings import invalidate_user_settings
+
+
+@st.dialog("Delete account")
+def confirm_total_wipe(supabase):
+    """Ask before permanently wiping all of the user's data."""
+    st.error("⚠️ **CRITICAL:** This will permanently wipe all your accounts, "
+             "transactions, and profile data. This cannot be undone.")
+    c1, c2 = st.columns(2)
+    if c1.button("❌ Confirm Permanent Wipe", type="primary", use_container_width=True):
+        try:
+            user_id = st.session_state.user_id
+            supabase.table("transactions").delete().eq("user_id", user_id).execute()
+            supabase.table("accounts").delete().eq("user_id", user_id).execute()
+            supabase.table("profiles").delete().eq("id", user_id).execute()
+
+            st.success("Data wiped. Logging out...")
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error during wipe: {e}")
+            return  # keep the dialog open so the error is visible
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
+
 
 def render_page(supabase):
     # ✨ THE FIX: Upgraded Tab CSS to explicitly use dynamic theme variables
@@ -68,19 +95,35 @@ def render_page(supabase):
                     full_name = st.text_input("Full Name", value=user_profile.get("full_name", ""))
                 with c2:
                     phone = st.text_input("Phone Number", value=user_profile.get("phone", ""))
-                
+
+                cur_options = list(CURRENCIES.keys())
+                current_cur = user_profile.get("preferred_currency", "INR")
+                selected_cur = st.selectbox(
+                    "🌍 Preferred Currency",
+                    cur_options,
+                    index=cur_options.index(current_cur) if current_cur in cur_options else 0,
+                    help="The currency used everywhere money is shown and in AI answers. "
+                         "Your amounts are still stored in ₹; when you pick a non-INR "
+                         "currency we show their live-converted equivalent."
+                )
+                st.caption(f"Symbol shown across the app: **{symbol(selected_cur)}**")
+
                 st.info("🟢 **KYC Status:** Not Required for basic tracking. Verification required only for live bank sync.")
-                
+
                 if st.form_submit_button("Save Personal Info", type="primary"):
                     try:
                         # ✨ THE FIX: Added the user's email into the upsert payload so it saves to Supabase!
                         supabase.table("profiles").upsert({
                             "id": st.session_state.user_id,
-                            "email": st.session_state.user_email, 
+                            "email": st.session_state.user_email,
                             "full_name": full_name,
                             "phone": phone,
+                            "preferred_currency": selected_cur,
                             "updated_at": "now()"
                         }).execute()
+                        # Apply the currency immediately app-wide (all pages + AI).
+                        st.session_state.preferred_currency = selected_cur
+                        invalidate_user_settings()
                         st.success("Profile updated successfully!")
                     except Exception as e:
                         st.error(f"Failed to update profile: {e}")
@@ -119,10 +162,14 @@ def render_page(supabase):
                 )
                 
                 st.write("")
-                st.select_slider(
-                    "⚠️ Investment Risk Tolerance", 
-                    options=["Very Conservative", "Moderate", "Aggressive", "Wall Street Bets"],
-                    value="Moderate"
+                current_risk = user_profile.get("risk_tolerance", "Moderate")
+                risk_options = ["Very Conservative", "Moderate", "Aggressive", "Wall Street Bets"]
+                risk_idx = risk_options.index(current_risk) if current_risk in risk_options else 1
+
+                selected_risk = st.select_slider(
+                    "⚠️ Investment Risk Tolerance",
+                    options=risk_options,
+                    value=risk_options[risk_idx]
                 )
 
                 if st.form_submit_button("Update AI Preferences", type="primary"):
@@ -131,8 +178,15 @@ def render_page(supabase):
                         supabase.table("profiles").update({
                             "ai_tone": selected_tone,
                             "financial_phase": selected_phase,
+                            "risk_tolerance": selected_risk,
                             "updated_at": "now()"
                         }).eq("id", st.session_state.user_id).execute()
+                        # Apply the persona immediately so the AI adapts on the
+                        # very next rerun, and let the settings loader re-fetch.
+                        st.session_state.ai_tone = selected_tone
+                        st.session_state.financial_phase = selected_phase
+                        st.session_state.risk_tolerance = selected_risk
+                        invalidate_user_settings()
                         st.success("AI Persona updated! The Guardrail will now adapt to these settings.")
                     except Exception as e:
                         st.error(f"Failed to update AI Preferences: {e}")
@@ -205,24 +259,4 @@ def render_page(supabase):
                 st.markdown("**Delete Account**")
                 st.caption("Permanently wipe all records, transactions, and profiles.")
                 if st.button("🗑️ Request Account Deletion", use_container_width=True):
-                    st.session_state.confirm_total_wipe = True
-                    
-            if st.session_state.get('confirm_total_wipe'):
-                st.error("⚠️ **CRITICAL:** This will permanently wipe all your accounts, transactions, and profile data. This cannot be undone.")
-                wc1, wc2 = st.columns(2)
-                if wc1.button("❌ Confirm Permanent Wipe", type="primary", use_container_width=True):
-                    try:
-                        user_id = st.session_state.user_id
-                        supabase.table("transactions").delete().eq("user_id", user_id).execute()
-                        supabase.table("accounts").delete().eq("user_id", user_id).execute()
-                        supabase.table("profiles").delete().eq("id", user_id).execute()
-                        
-                        st.success("Data wiped. Logging out...")
-                        for key in list(st.session_state.keys()):
-                            del st.session_state[key]
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error during wipe: {e}")
-                if wc2.button("Cancel", use_container_width=True):
-                    st.session_state.confirm_total_wipe = False
-                    st.rerun()
+                    confirm_total_wipe(supabase)

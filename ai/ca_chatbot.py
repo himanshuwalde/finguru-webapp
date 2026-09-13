@@ -21,6 +21,8 @@ from supabase import Client
 from ai.context_builder import run_tools, serialize_results
 from ai.intent_router import INTENT_TOOLS, route_intent
 from ai.prompts import build_prompt, deterministic_answer
+from utils.ai_persona import build_persona_block
+from utils.currency import ai_currency_note
 
 
 def respond(supabase: Client, user_id: str,
@@ -37,12 +39,18 @@ def respond(supabase: Client, user_id: str,
     results = run_tools(supabase, user_id, tool_names)
     grounding = serialize_results(results)
 
+    # Strict per-user persona + currency instructions injected before the data.
+    persona_block = build_persona_block()
+    currency_note = ai_currency_note()
+
     try:
         from utils.ai_client import (get_gemini_client, get_generative_model,
                                      generate_content_safe)
         genai = get_gemini_client()
         model = get_generative_model(genai, prefer_flash=True)
-        prompt = build_prompt(user_message, grounding, history)
+        prompt = build_prompt(user_message, grounding, history,
+                              persona_block=persona_block,
+                              currency_note=currency_note)
         text = generate_content_safe(model, prompt, max_retries=1)
     except Exception as e:
         print(f"[ca_chatbot] AI call failed ({e}); using deterministic fallback")

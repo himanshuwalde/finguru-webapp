@@ -2,6 +2,8 @@ import os
 import pandas as pd
 from datetime import datetime
 import google.generativeai as genai
+from utils.ai_persona import persona_and_currency_note
+from utils.currency import fmt_money
 from utils.email_engine import send_financial_alert
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
@@ -15,14 +17,16 @@ def generate_anomaly_email_content(user_name, account_name, amount, description,
     if is_temporal:
         reasons.append("It occurred late at night (between Midnight and 5:00 AM).")
     if is_behavioral:
-        reasons.append(f"It is significantly higher than their usual average (₹{category_mean:,.0f}) for this category.")
-        
+        reasons.append(f"It is significantly higher than their usual average ({fmt_money(category_mean)}) for this category.")
+
     prompt = f"""
+    {persona_and_currency_note()}
+
     You are FinGuru's Security AI. You just detected a suspicious transaction for {user_name} on their "{account_name}" account.
-    
+
     Transaction Details:
     - Merchant: {description}
-    - Amount: ₹{amount:,.2f}
+    - Amount: {fmt_money(amount, dp=2)}
     - Time: {date_str}
     - Why flagged: {' '.join(reasons)}
     

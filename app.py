@@ -21,6 +21,7 @@ import pages.fire_planner as fire_planner
 import pages.ai_advisor as ai_advisor
 import streamlit as st
 from supabase import create_client, Client
+from utils.user_settings import ensure_user_settings
 
 st.set_page_config(page_title="AI Financial Guru", page_icon="💰", layout="wide")
 
@@ -36,6 +37,7 @@ st.set_page_config(page_title="AI Financial Guru", page_icon="💰", layout="wid
 # tokens back to Python through the component's return value — no navigation.
 # ==========================================
 import os as _os
+import json
 _RECOVERY_READER_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "recovery_reader")
 _recovery_reader = components.declare_component("recovery_reader", path=_RECOVERY_READER_DIR)
 
@@ -44,31 +46,50 @@ _recovery_reader = components.declare_component("recovery_reader", path=_RECOVER
 # ✨ AUTH AUTOFILL ENHANCER
 # Streamlit renders st.text_input as standalone widgets with autocomplete="off"
 # and no name/association, so browsers refuse to treat Email+Password as a
-# login form. This template (injected as a components.html script) links the
-# two inputs to one hidden native <form> via the `form` attribute and sets
-# proper autocomplete/name, which makes password managers autofill the saved
-# password when the email is filled. __AUTH_MODE__ is substituted per render.
+# login form. Two problems are solved here:
+#
+#  1. SILENT INSTANT FILL — if the inputs are marked as a login form at page
+#     load, Chrome fills the saved password immediately, while Streamlit's
+#     controlled React input is wiped back to "" on its next re-render, so the
+#     fields LOOK filled but submit empty credentials ("Login failed" with the
+#     right password). To avoid that we apply the form recognition LAZILY —
+#     only when the user's focus/click reaches an auth field. Chrome (and other
+#     managers) then surface their account chooser on click instead of filling
+#     silently, and the chosen credential lands at a stable moment.
+#
+#  2. FILLED-VALUE PROPAGATION — when a password manager does write into the
+#     inputs, the value does not always reach Streamlit's state. A companion
+#     component (auth_autofill_reader/) echoes the live DOM values back to
+#     Python each render, and the app adopts them into session_state so a
+#     submit uses real credentials. (See _autofill_echo below.)
+#
+# __AUTH_MODE__ is substituted per render.
 # ==========================================
 _AUTH_AUTOFILL_SCRIPT = """
 <script>
 (function() {
     var MODE = "__AUTH_MODE__";
     var FORM_ID = "st_auth_autofill_form";
-    var done = false, attempts = 0;
+    var wired = false;
+    var WIRE_SELECTOR = (MODE === "update_pwd")
+        ? 'input[type="password"]'
+        : 'input[aria-label="Email"], input[aria-label="Password"]';
 
-    function wire(win) {
-        if (done) return;
-        var doc = win.document;
+    function wire() {
+        var doc;
+        try { doc = window.parent.document; } catch (e) { return; }
         var email = doc.querySelector('input[aria-label="Email"]');
-        var pwd = (MODE === "update_pwd")
-            ? doc.querySelector('input[type="password"]')
-            : doc.querySelector('input[aria-label="Password"][type="password"]');
-        if (!email && !pwd) { attempts++; return; }
-        done = true;
+        var pwd = doc.querySelector('input[type="password"]');
+        if (MODE === "update_pwd") {
+            if (!pwd) return;
+        } else if (!email && !pwd) {
+            return;
+        }
+        if (wired) return;
+        wired = true;
 
-        // One hidden form that the fields are ASSOCIATED with (form= attr), so
-        // the browser sees them as a single credential form without us touching
-        // Streamlit's own DOM tree.
+        // One hidden native form the fields are ASSOCIATED with (form= attr), so
+        // browsers see a single credential form — without touching Streamlit's DOM.
         var form = doc.getElementById(FORM_ID);
         if (!form) {
             form = doc.createElement("form");
@@ -77,6 +98,7 @@ _AUTH_AUTOFILL_SCRIPT = """
             form.style.cssText = "position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;";
             var sb = doc.createElement("button");
             sb.type = "submit";
+            sb.setAttribute("tabindex", "-1");
             sb.style.cssText = "display:none;";
             form.appendChild(sb);
             doc.body.appendChild(form);
@@ -88,28 +110,130 @@ _AUTH_AUTOFILL_SCRIPT = """
             field.setAttribute("name", name);
             field.setAttribute("autocomplete", auto);
         }
-
         if (email) apply(email, "email", (MODE === "signup" || MODE === "reset") ? "email" : "username");
         if (pwd) apply(pwd, "password", MODE === "login" ? "current-password" : "new-password");
 
-        // Enter inside an autofilled field should submit the mode's action.
+        // Enter inside an auth field should submit the mode's action.
         if (!form.dataset.stAutoReady) {
             form.dataset.stAutoReady = "1";
             form.addEventListener("submit", function (ev) {
                 ev.preventDefault();
-                var btn = doc.querySelector('button[kind="primaryFormSubmit"]');
+                var btn = doc.querySelector('button[kind="primaryFormSubmit"], button[kind="primary"]');
                 if (btn) btn.click();
             });
         }
     }
 
-    var iv = setInterval(function () {
-        try { wire(window.parent); } catch (e) {}
-        if (done || ++attempts > 60) clearInterval(iv);
-    }, 250);
+    // Lazy recognition: hook the parent document and enable the fields only when
+    // the user actually interacts with the auth area (focus/click dispatch first,
+    // before the browser decides whether to show its credential chooser/fill).
+    function enable() { wire(); }
+
+    var doc = null;
+    try { doc = window.parent.document; } catch (e) {}
+    if (doc) {
+        doc.addEventListener("focus", enable, true);
+        doc.addEventListener("click", enable, true);
+
+        // Attach one-time hooks to the inputs as they appear, so focus/click on a
+        // specific field still enables recognition even after a re-render. This
+        // only ADDS listeners — wire() stays lazy (focus/click only).
+        function attachLazily() {
+            var items = [];
+            try { items = [].slice.call(doc.querySelectorAll(WIRE_SELECTOR)); } catch (e) {}
+            items.forEach(function (el) {
+                if (el.dataset.stAutoHooked) return;
+                el.dataset.stAutoHooked = "1";
+                el.addEventListener("focus", enable, true);
+                el.addEventListener("click", enable, true);
+            });
+        }
+        if (doc.readyState !== "loading") attachLazily();
+        else doc.addEventListener("DOMContentLoaded", attachLazily);
+        setInterval(attachLazily, 1000);
+    }
 })();
 </script>
 """
+
+# ==========================================
+# ✨ AUTH AUTOFILL VALUE ECHO
+# Companion to _AUTH_AUTOFILL_SCRIPT: a small custom component captures the live
+# email/password values the inputs hold (memory that React can't wipe) and
+# reports them to Python on every render, so the app can adopt browser-filled
+# values into session_state before building the widgets.
+# ==========================================
+_AUTOFILL_READER_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "auth_autofill_reader")
+_autofill_reader = components.declare_component("auth_autofill_reader", path=_AUTOFILL_READER_DIR)
+
+# Widget keys per auth mode: (email_key_or_None, password_key_or_None)
+_AUTOFILL_KEYS = {
+    "login": ("login_email", "login_password"),
+    "signup": ("signup_email", "signup_password"),
+    "reset": ("reset_email_input", None),
+    "update_pwd": (None, "new_pwd_input"),
+}
+
+# ==========================================
+# ✨ SESSION PERSISTENCE ACROSS REFRESH
+# Streamlit's session_state is rebuilt on every page refresh, so a refresh drops
+# the login and strands the user on the landing page. To keep a logged-in user on
+# the SAME module through a refresh (no re-authentication), the app persists a
+# small copy of the Supabase session in the browser via the session_keep/
+# component and re-arms it at the top of each run:
+#
+#   * cookie (fast path)   — session_keep writes `finguru_session` to a
+#     same-origin cookie (path=/); the browser sends it with the refresh request
+#     and Python reads it straight out of the request headers on the very FIRST
+#     run — the session is restored before routing, so refresh goes straight to
+#     the app page with no landing-page flash and no re-login.
+#
+#   * localStorage (fallback) — session_keep mirrors the blob into localStorage
+#     and posts it back on the following rerun, so refresh-survival still works if
+#     the cookie header is stripped by a proxy/cloud cache (in that case the
+#     first run briefly shows the landing page before re-routing).
+#
+# Security: storing an OAuth access/refresh token in the browser is exactly what
+# Supabase's own JS client does for every SPA (its default storage is
+# localStorage). The cookie is SameSite=Lax (blocks cross-site carries) and
+# Secure on https. Tokens never enter the URL or server-side logs.
+# ==========================================
+_SESSION_KEEP_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "session_keep")
+_session_keep = components.declare_component("session_keep", path=_SESSION_KEEP_DIR)
+_SESSION_COOKIE_NAME = "finguru_session"
+_DEFAULT_PAGE = "📊 Dashboard (Expense Tracking)"
+
+
+def _autofill_echo(mode):
+    """Adopt browser-filled auth values into Streamlit state.
+
+    Password managers write directly into the visible <input>; Streamlit's
+    controlled widget sometimes never learns the new value and, worse, wipes the
+    field back to "" on its next re-render — so a submit silently sends empty
+    credentials even though the fields looked filled (this was the reported
+    "can't log in with correct credentials"). The auth_autofill_reader component
+    captures the live input values (memory React can't wipe) and reports them
+    here on every render; we adopt them into session_state BEFORE the widgets
+    are created, so the widgets render with the real values and the submit uses
+    them. On normal typing this adoption is a no-op (values already match).
+    """
+    key = _AUTOFILL_KEYS.get(mode)
+    if not key:
+        return
+    email_key, pwd_key = key
+    try:
+        v = _autofill_reader() or {}
+    except Exception:
+        return
+    if not v or v.get("error"):
+        return
+    # Adopt non-empty values observed in the inputs. During normal typing this
+    # is a no-op (the value already matches), and for a password-manager fill it
+    # is exactly what makes the submit use real credentials.
+    if email_key and v.get("email"):
+        st.session_state[email_key] = v["email"]
+    if pwd_key and v.get("password"):
+        st.session_state[pwd_key] = v["password"]
 
 # ==========================================
 # ✨ SIDEBAR THEME FIX
@@ -174,14 +298,25 @@ components.html("""
                     color: ${textColor};
                 }
 
-                /* Radio button labels */
-                [data-testid="stSidebar"] [role="radiogroup"] label {
+                /* Radio button labels - Main Menu */
+                [data-testid="stSidebar"] [role="radiogroup"] label,
+                [data-testid="stSidebar"] [role="radiogroup"] label div,
+                [data-testid="stSidebar"] [role="radiogroup"] label span {
                     color: ${textColor} !important;
+                }
+                [data-testid="stSidebar"] [role="radiogroup"] label {
                     border-radius: 8px;
                     padding: 8px 12px;
+                    background-color: transparent;
                 }
                 [data-testid="stSidebar"] [role="radiogroup"] label:hover {
                     background-color: ${hoverBg} !important;
+                }
+                [data-testid="stSidebar"] [role="radiogroup"] label[data-selected="true"] {
+                    background-color: ${hoverBg} !important;
+                }
+                [data-testid="stSidebar"] [role="radiogroup"] {
+                    background-color: transparent !important;
                 }
 
                 /* HR dividers */
@@ -452,6 +587,83 @@ if 'editing_account' not in st.session_state: st.session_state.editing_account =
 if 'force_page' not in st.session_state: st.session_state.force_page = None
 if 'ai_consent' not in st.session_state: st.session_state.ai_consent = False
 if 'auth_mode' not in st.session_state: st.session_state.auth_mode = 'login'
+if '_auth_access' not in st.session_state: st.session_state._auth_access = ""
+if '_auth_refresh' not in st.session_state: st.session_state._auth_refresh = ""
+
+
+def _read_session_cookie():
+    """Read the persisted FinGuru session out of the request's Cookie header.
+    This is synchronous — it is available on the very first run after a refresh,
+    which is what lets us restore before routing (no landing-page flash)."""
+    try:
+        import urllib.parse
+        headers = st.context.headers
+    except Exception:
+        return None
+    for k, v in headers.items():
+        if str(k).lower() != "cookie":
+            continue
+        for part in v.split(";"):
+            part = part.strip()
+            if part.startswith(_SESSION_COOKIE_NAME + "="):
+                raw = part[len(_SESSION_COOKIE_NAME) + 1:]
+                try:
+                    return json.loads(urllib.parse.unquote(raw))
+                except Exception:
+                    return None
+    return None
+
+
+def _persist_json():
+    """Serialize the live login + current nav choice into the JSON blob the
+    browser keeps (cookie + localStorage mirror). None when not logged in."""
+    state = st.session_state
+    if not state.get("logged_in") or not state.get("_auth_access"):
+        return None
+    return json.dumps({
+        "access_token": state["_auth_access"],
+        "refresh_token": state.get("_auth_refresh") or "",
+        "email": state.get("user_email") or "",
+        "id": state.get("user_id") or "",
+        "page": state.get("sidebar_choice", _DEFAULT_PAGE),
+    })
+
+
+def _restore_session_from(blob):
+    """Re-arm the Supabase client and rebuild login state from a persisted
+    {access_token, refresh_token, email, id, page} blob so a page refresh stays
+    logged in on the same module without re-authentication.
+    Returns True when the session was restored."""
+    if not blob or not blob.get("access_token"):
+        return False
+    try:
+        # set_session needs both tokens to be able to replay refresh-based
+        # expiry; then get_user() confirms the tokens still sign the user.
+        supabase.auth.set_session(blob["access_token"], blob.get("refresh_token") or "")
+        supabase.auth.get_user()
+    except Exception:
+        try:  # the access token may have already expired — let the refresh try
+            refreshed = supabase.auth.refresh_session()
+            sess = getattr(refreshed, "session", None)
+            user = getattr(refreshed, "user", None)
+            if not refreshed or not user or not sess:
+                return False
+            blob = dict(blob)
+            blob["access_token"] = getattr(sess, "access_token", "") or ""
+            blob["refresh_token"] = getattr(sess, "refresh_token", "") or ""
+            blob["email"] = getattr(user, "email", "") or ""
+            blob["id"] = getattr(user, "id", "") or ""
+        except Exception:
+            return False
+    st.session_state.logged_in = True
+    st.session_state.user_email = blob.get("email") or ""
+    st.session_state.user_id = blob.get("id") or ""
+    st.session_state.show_auth_page = False
+    st.session_state["_auth_access"] = blob.get("access_token") or ""
+    st.session_state["_auth_refresh"] = blob.get("refresh_token") or ""
+    if blob.get("page"):
+        st.session_state.sidebar_choice = blob["page"]
+    return True
 
 def _app_base_url():
     """Best-effort base URL of the app, used as the password-reset redirect so
@@ -568,6 +780,47 @@ if _recovery_folded or _recovery_consumed:
     # The one-time tokens were seen (valid or not) — never re-process them.
     st.session_state["_recovery_handled"] = True
 
+# ==========================================
+# ✨ RESTORE SESSION ON LOAD / PERSIST ON NAV
+# Runs before the routing branches. Rebuilds a logged-in session from the
+# browser-persisted blob (see session_keep/ above) so a page refresh keeps the
+# user logged in on the same module. Skipped while a password-reset handoff is
+# in flight (that flow must land on the New-Password form) and right after
+# Log Out (the persisted copy is being erased that same run).
+# ==========================================
+_persist_clear_requested = bool(st.session_state.pop("_persist_clear", False))
+
+if (not (_recovery_folded or _recovery_consumed)
+        and not _persist_clear_requested
+        and not st.session_state.logged_in):
+    try:
+        _cookie_blob = _read_session_cookie()
+    except Exception:
+        _cookie_blob = None
+    if _cookie_blob and not _restore_session_from(_cookie_blob):
+        # Stale/invalid tokens — retire them so every refresh stops retrying.
+        _persist_clear_requested = True
+        st.error("Your session expired. Please log in again.")
+
+# Browser bridge: writes the cookie + localStorage mirror when a store is passed
+# (logged in), erases both after Log Out, and otherwise reports what the browser
+# still holds (the localStorage fallback for when the cookie header is absent).
+try:
+    if st.session_state.logged_in and not _persist_clear_requested:
+        _keeper = _session_keep(store=_persist_json() or "") or {}
+    else:
+        _keeper = _session_keep(clear=_persist_clear_requested) or {}
+except Exception:
+    _keeper = {}
+
+if (not st.session_state.logged_in
+        and not _persist_clear_requested
+        and not (_recovery_folded or _recovery_consumed)
+        and _keeper.get("session")):
+    # Cookie was unavailable but the localStorage mirror survived — restore from
+    # it; the next run re-persists so the cookie is (re)created too.
+    _restore_session_from(_keeper["session"])
+
 def go_to_auth():
     st.session_state.show_auth_page = True
 
@@ -598,19 +851,56 @@ def render_module_grid(modules, per_row=3):
                 </div>
                 """, unsafe_allow_html=True)
 
+@st.dialog("Log out")
+def confirm_logout():
+    """Ask before signing out — log out is a destructive session action."""
+    st.warning("Are you sure you want to log out?")
+    c1, c2 = st.columns(2)
+    if c1.button("Log out", type="primary", use_container_width=True):
+        supabase.auth.sign_out()
+        for key in ['logged_in', 'user_email', 'user_id', 'show_auth_page', 'editing_account', 'force_page', 'ai_consent', 'aa_consent_token', 'has_synced_this_session']:
+            st.session_state[key] = False if key in ['logged_in', 'show_auth_page', 'ai_consent', 'aa_consent_token', 'has_synced_this_session'] else ("" if key in ['user_email', 'user_id'] else None)
+        st.session_state["_auth_access"] = ""
+        st.session_state["_auth_refresh"] = ""
+        # Erase the persisted cookie + localStorage mirror on the next run, and
+        # don't let the restore block resurrect the session in the meantime.
+        st.session_state._persist_clear = True
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
+
 if st.session_state.logged_in:
     # ==========================================
-    # ✨ THE JPMC AUTO-SYNC BACKGROUND LISTENER 
+    # ✨ THE JPMC AUTO-SYNC BACKGROUND LISTENER
     # ==========================================
     account_aggregator.run_background_sync(supabase, st.session_state.user_id)
+
+    # ==========================================
+    # ✨ PREFERRED CURRENCY + AI PERSONA LOADER
+    # Pulls preferred_currency, ai_tone, financial_phase and risk_tolerance
+    # from profiles into session_state once per login, so every page and every
+    # LLM prompt reads the user's chosen currency and persona. Missing columns
+    # (pre-migration) degrade gracefully to the INR / Strict Accountant /
+    # Building Wealth / Moderate defaults.
+    # ==========================================
+    ensure_user_settings(supabase, st.session_state.user_id)
 
     # ==========================================
     # ✨ UPGRADED SIDEBAR UI
     # ==========================================
     
     st.sidebar.markdown("""
-        <h2 style='color: var(--text-color); font-weight: 800; margin-top: 0; padding-top: 0; margin-bottom: 1rem;'>FinGuru <span style='color: var(--primary-color);'>AI</span></h2>
+        <h2 style='color: var(--text-color); font-weight: 800; margin-top: 0; padding-top: 0; margin-bottom: 0.5rem;'>FinGuru <span style='color: var(--primary-color);'>AI</span></h2>
     """, unsafe_allow_html=True)
+
+    # Quick access to Profile & Settings at the top
+    if st.sidebar.button("⚙️ Profile & Settings", use_container_width=True, key="quick_profile_settings_btn"):
+        st.session_state.force_page = "⚙️ Profile & Settings"
+        st.rerun()
+
+    # Default to Dashboard if no page selected
+    if "sidebar_choice" not in st.session_state:
+        st.session_state.sidebar_choice = "📊 Dashboard (Expense Tracking)"
     
     st.sidebar.markdown(f"""
         <div style="background: linear-gradient(135deg, #2563EB 0%, #9333EA 100%); padding: 15px; border-radius: 12px; color: white; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
@@ -632,7 +922,6 @@ if st.session_state.logged_in:
     st.sidebar.markdown("<div style='font-size: 0.8rem; color: var(--text-color); opacity: 0.6; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;'>Main Menu</div>", unsafe_allow_html=True)
     
     menu_options = [
-        "⚙️ Profile & Settings",
         "📊 Dashboard (Expense Tracking)",
         "🧾 Tax Planner (Old vs New Regime)",
         "📈 Investment Portfolio",
@@ -679,12 +968,9 @@ if st.session_state.logged_in:
     """, height=0)
 
     st.sidebar.markdown("<hr>", unsafe_allow_html=True)
-    
+
     if st.sidebar.button("🚪 Log Out", use_container_width=True):
-        supabase.auth.sign_out()
-        for key in ['logged_in', 'user_email', 'user_id', 'show_auth_page', 'editing_account', 'force_page', 'ai_consent', 'aa_consent_token', 'has_synced_this_session']:
-            st.session_state[key] = False if key in ['logged_in', 'show_auth_page', 'ai_consent', 'aa_consent_token', 'has_synced_this_session'] else ("" if key in ['user_email', 'user_id'] else None)
-        st.rerun()
+        confirm_logout()
 
     # ==========================================
     # ✨ THE PRIVACY GATEKEEPER
@@ -714,10 +1000,10 @@ if st.session_state.logged_in:
     # --- ROUTING ---
     if st.session_state.force_page == "add_transaction":
         add_transaction.render_page(supabase)
+    elif st.session_state.force_page == "⚙️ Profile & Settings":
+        profile.render_page(supabase)
     else:
-        if choice == "⚙️ Profile & Settings":
-            profile.render_page(supabase)
-        elif choice == "📊 Dashboard (Expense Tracking)":
+        if choice == "📊 Dashboard (Expense Tracking)":
             dashboard.render_page(supabase)
         elif choice == "🧾 Tax Planner (Old vs New Regime)":
             tax_planner.render_page(supabase)
@@ -754,6 +1040,10 @@ if st.session_state.logged_in:
 
 
 elif st.session_state.show_auth_page:
+    # Adopt browser-filled credentials into Streamlit state FIRST so the
+    # widgets render with any password-manager values (see auth_autofill_reader).
+    _autofill_echo(st.session_state.auth_mode)
+
     st.markdown("""
     <style>
         [data-testid="stHeader"] { visibility: hidden; }
@@ -833,7 +1123,12 @@ elif st.session_state.show_auth_page:
                         st.session_state.logged_in = True
                         st.session_state.user_email = response.user.email
                         st.session_state.user_id = response.user.id
-                        st.session_state.show_auth_page = False 
+                        st.session_state.show_auth_page = False
+                        # Remember the tokens so the session_keep component can
+                        # persist them across a refresh (see the restore block).
+                        _sess = getattr(response, "session", None)
+                        st.session_state["_auth_access"] = getattr(_sess, "access_token", "") if _sess else ""
+                        st.session_state["_auth_refresh"] = getattr(_sess, "refresh_token", "") if _sess else ""
                         st.rerun()
                     except Exception as e:
                         st.error("Login failed. Please check your email and password.")
@@ -902,6 +1197,11 @@ elif st.session_state.show_auth_page:
                             # Drop the one-time recovery session so the next login
                             # uses the freshly reset password.
                             supabase.auth.sign_out()
+                            # Also drop any browser-persisted session — if one
+                            # existed it belongs to the previous password.
+                            st.session_state._persist_clear = True
+                            st.session_state["_auth_access"] = ""
+                            st.session_state["_auth_refresh"] = ""
                             st.success("✅ Password updated! Please log in with your new password.")
                             st.query_params.clear()
                             st.session_state.auth_mode = 'login'

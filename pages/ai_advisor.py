@@ -16,6 +16,18 @@ from ai.intent_router import TOOL_DESCRIPTIONS
 from utils.ui_components import render_gradient_header, render_alert_banner
 
 
+@st.dialog("Clear conversation")
+def confirm_clear_conversation():
+    """Ask before wiping the in-session CA chat history."""
+    st.warning("Clear this conversation? The chat history will be wiped.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, clear", type="primary", use_container_width=True):
+        st.session_state.ca_messages = []
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
+
+
 def render_page(supabase):
     render_gradient_header(
         "🧑‍💼", "AI CA Advisor (Grounded)",
@@ -73,8 +85,7 @@ def render_page(supabase):
         c1, c2 = st.columns(2)
         with c1:
             if st.button("🗑 Clear conversation", use_container_width=True):
-                st.session_state.ca_messages = []
-                st.rerun()
+                confirm_clear_conversation()
         with c2:
             with st.expander("See the grounding data this session used"):
                 st.json(json.dumps({k: v for k, v in

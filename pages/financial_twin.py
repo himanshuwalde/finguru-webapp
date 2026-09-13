@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
+from utils.ai_persona import persona_and_currency_note
+from utils.currency import fmt_label, fmt_money
 
 # Initialize AI client
 genai_client = get_gemini_client()
@@ -69,12 +71,12 @@ def render_page(supabase):
         current_age = st.number_input("Current Age", min_value=18, max_value=80, value=25)
         retirement_age = st.number_input("Target Retirement Age", min_value=current_age+1, max_value=100, value=60)
     with c2:
-        monthly_saving = st.number_input("Monthly Contribution (₹)", min_value=0, value=15000, step=1000)
+        monthly_saving = st.number_input(fmt_label("Monthly Contribution (₹)"), min_value=0, value=15000, step=1000)
         # This forces the starting value to be at least 0.0
         starting_value = max(0.0, float(current_net_worth))
 
         starting_amount = st.number_input(
-            "Starting Capital (₹)", 
+            fmt_label("Starting Capital (₹)"), 
             min_value=0.0, 
             value=starting_value, 
             step=10000.0
@@ -132,7 +134,7 @@ def render_page(supabase):
             fig.update_layout(
                 title="Probability-Based Wealth Projection",
                 xaxis_title="Age",
-                yaxis_title="Net Worth (₹)",
+                yaxis_title=fmt_label("Net Worth (₹)"),
                 hovermode="x unified",
                 margin=dict(t=40, b=10, l=10, r=10),
                 height=450,
@@ -143,14 +145,14 @@ def render_page(supabase):
             
             # Show final outcome metrics
             m1, m2, m3 = st.columns(3)
-            m1.metric("📉 Pessimistic (Bottom 10%)", f"₹{percentile_10[-1]:,.0f}")
-            m2.metric("🎯 Expected (Median)", f"₹{percentile_50[-1]:,.0f}")
-            m3.metric("🚀 Optimistic (Top 10%)", f"₹{percentile_90[-1]:,.0f}")
+            m1.metric("📉 Pessimistic (Bottom 10%)", fmt_money(percentile_10[-1]))
+            m2.metric("🎯 Expected (Median)", fmt_money(percentile_50[-1]))
+            m3.metric("🚀 Optimistic (Top 10%)", fmt_money(percentile_90[-1]))
 
     # --- 5. THE AI "FUTURE SELF" CHAT ---
     st.write("---")
     st.subheader("💬 Chat with your Future Self")
-    st.markdown("Ask how a purchase today impacts your timeline (e.g., *'What happens if I buy a ₹20 Lakh car today instead of investing it?'*)")
+    st.markdown(f"Ask how a purchase today impacts your timeline (e.g., *'What happens if I buy a {fmt_money(2000000)} car today instead of investing it?'*)")
 
     if 'twin_messages' not in st.session_state:
         st.session_state.twin_messages = []
@@ -185,10 +187,14 @@ def render_page(supabase):
                         chat_history_str = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in st.session_state.twin_messages])
 
                         # Optimized prompt with state-dependent logic and actual portfolio values
+                        # Inject the user's strict persona + display-currency rule.
+                        persona_cur = persona_and_currency_note()
                         system_prompt = f"""
+                        {persona_cur}
+
                         You are the user's "Financial Twin"—their future self at age {context_data['age']}. User's Current age: {context_data['AGE']}.
-                        Current expected retirement net worth: ₹{context_data['median']:,.0f}
-                        (Range: ₹{context_data['worst_case']:,.0f} to ₹{context_data['best_case']:,.0f}).
+                        Current expected retirement net worth: {fmt_money(context_data['median'])}
+                        (Range: {fmt_money(context_data['worst_case'])} to {fmt_money(context_data['best_case'])}).
                         The user's actual current portfolio growth rate is {context_data['portfolio_return']}%.
 
                         Read the chat history to determine which phase you are in:

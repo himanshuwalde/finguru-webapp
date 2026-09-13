@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import networkx as nx
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
+from utils.ai_persona import persona_and_currency_note
 
 # Initialize AI client
 genai_client = get_gemini_client()
@@ -74,6 +75,21 @@ def show_claim_toolkit(asset_name):
         st.markdown("3. **Submit to Institution:** Once the court grants the certificate, submit it along with the Indemnity Bond to the bank or registrar.")
         
         st.warning("🚨 **Beware of the IEPF:** If an asset remains unclaimed for 7 consecutive years, it is transferred to the government's Investor Education and Protection Fund (IEPF). Reclaiming it from the IEPF is extremely difficult.")
+
+@st.dialog("Remove successor")
+def confirm_remove_successor(supabase, succ, my_account_ids):
+    """Ask before permanently removing a successor and revoking their access."""
+    succ_name = succ.get('successor_name', succ['successor_email'])
+    st.warning(f"Remove **{succ_name}** and revoke their access to all your "
+               "assets? This cannot be undone.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, remove", type="primary", use_container_width=True):
+        supabase.table("successors").delete().eq("id", succ['id']).execute()
+        supabase.table("nominations").delete().eq("successor_email", succ['successor_email']) \
+            .in_("account_id", my_account_ids).execute()
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
 
 def render_page(supabase):
     # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags to prevent Streamlit render glitches
@@ -218,7 +234,10 @@ def render_page(supabase):
                                 model = genai_client.GenerativeModel(target_model)
 
                                 asset_context = f"the following assets: {', '.join(assigned_assets)}" if assigned_assets else "my financial portfolio"
-                                prompt = f"Draft a short, warm WhatsApp message to my {succ['relationship']}, {succ_name}. Let them know I added them as a 'Successor-Viewer' for {asset_context} on the AI Financial Twin app. Reassure them it's a Zero-Balance view for safety."
+                                prompt = (f"{persona_and_currency_note()}\n\n"
+                                f"Draft a short, warm WhatsApp message to my {succ['relationship']}, {succ_name}. "
+                                f"Let them know I added them as a 'Successor-Viewer' for {asset_context} on the "
+                                f"AI Financial Twin app. Reassure them it's a Zero-Balance view for safety.")
                                 response_text = generate_content_safe(model, prompt)
 
                                 if response_text:
@@ -229,19 +248,7 @@ def render_page(supabase):
                                 st.error(f"Failed to generate invite: {e}")
 
                     if btn_c2.button("❌ Remove", key=f"del_init_{succ['id']}", use_container_width=True):
-                        st.session_state[f"confirm_del_{succ['id']}"] = True
-
-                    if st.session_state.get(f"confirm_del_{succ['id']}", False):
-                        st.error(f"⚠️ Remove {succ_name} and revoke their access to all assets?")
-                        warn_c1, warn_c2 = st.columns(2)
-                        if warn_c1.button("✅ Yes, Remove", key=f"yes_{succ['id']}", type="primary", use_container_width=True):
-                            supabase.table("successors").delete().eq("id", succ['id']).execute()
-                            supabase.table("nominations").delete().eq("successor_email", succ['successor_email']).in_("account_id", my_account_ids).execute()
-                            st.session_state.pop(f"confirm_del_{succ['id']}", None)
-                            st.rerun()
-                        if warn_c2.button("❌ Cancel", key=f"no_{succ['id']}", use_container_width=True):
-                            st.session_state.pop(f"confirm_del_{succ['id']}", None)
-                            st.rerun()
+                        confirm_remove_successor(supabase, succ, my_account_ids)
 
     with c2:
         st.subheader("🔗 Assign Visibility")
@@ -380,7 +387,10 @@ def render_page(supabase):
                 try:
                     target_model = get_best_model(genai_client, prefer_flash=True)
                     model = genai_client.GenerativeModel(target_model)
-                    prompt = f"You are an empathetic Intergenerational Wealth Agent. User has dormant accounts: {', '.join([s['name'] for s in unassigned_stagnant])}. Write a short 2-paragraph message noting the stagnation and urging them to assign a successor."
+                    prompt = (f"{persona_and_currency_note()}\n\n"
+                                f"You are an empathetic Intergenerational Wealth Agent. User has dormant accounts: "
+                                f"{', '.join([s['name'] for s in unassigned_stagnant])}. Write a short 2-paragraph message "
+                                f"noting the stagnation and urging them to assign a successor.")
                     response_text = generate_content_safe(model, prompt)
 
                     if response_text:

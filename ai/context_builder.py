@@ -15,6 +15,7 @@ from typing import Callable, Dict, List, Tuple
 from supabase import Client
 
 from engines import tax_engine
+from utils.currency import (DEFAULT_CODE, fmt_money, symbol, to_display)
 from services.database import get_db_service
 from services.fire_service import get_fire_service
 from services.networth_service import get_networth_service
@@ -25,13 +26,94 @@ DEFAULT_AY = "2026-27"
 
 
 def _fmt_money(v: float) -> str:
-    return f"₹{v:,.0f}"
+    return fmt_money(v)
 
 
 def _pprune(d: Dict, max_chars: int = 1_200_000) -> str:
     """Serialize dict → JSON, trimmed for the prompt (safety cap)."""
     s = json.dumps(d, default=float, indent=1)
     return s[:max_chars]
+
+
+# ------------------------------------------------------------------- currency
+
+# Which tool-result fields are money (stored INR) vs percentages/scores/ages.
+# "ALL" → every numeric in that result is a money amount. A set → only those
+# keys (and their subtrees, e.g. "allocation") are money.
+_MONEY_SPECS: Dict[str, object] = {
+    "tax_calculator": "ALL",
+    "net_worth": "ALL",
+    "spending_summary": {"avg_monthly_expense", "last_month_expense",
+                         "avg_monthly_income"},
+    "portfolio_summary": {"total_invested", "total_current", "absolute_return",
+                          "allocation"},
+    "fire_status": {"future_monthly_expense", "annual_expense_at_retirement",
+                    "required_corpus", "median_corpus", "p5_corpus",
+                    "p95_corpus", "shortfall_vs_median"},
+}
+
+
+def _map_numeric(o: object) -> object:
+    """Recursively convert every numeric in a structure to the display currency."""
+    if isinstance(o, dict):
+        return {k: _map_numeric(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_map_numeric(x) for x in o]
+    if isinstance(o, bool):
+        return o
+    if isinstance(o, (int, float)):
+        return to_display(float(o))
+    return o
+
+
+def _map_keys(o: object, keep: set) -> object:
+    """Convert numerics only under the money keys (recursively) — everything
+    else (percentages, scores, ages, strings) passes through untouched."""
+    if isinstance(o, dict):
+        return {k: (_map_numeric(v) if k in keep else _map_keys(v, keep))
+                for k, v in o.items()}
+    if isinstance(o, list):
+        return [_map_keys(x, keep) for x in o]
+    return o
+
+
+def _in_display_currency(tool: str, data: Dict) -> Dict:
+    """Return a copy of tool output with stored-INR amounts re-expressed in the
+    user's display currency (identity when INR). Never touches the raw dict."""
+    spec = _MONEY_SPECS.get(tool)
+    if spec == "ALL":
+        return _map_numeric(data)
+    if isinstance(spec, set):
+        return _map_keys(data, spec)
+    return data
+
+
+def _user_settings() -> Dict:
+    """Current currency + persona from session state (safe offline: INR +
+    default persona)."""
+    try:
+        import streamlit as st
+        cur = st.session_state.get("preferred_currency") or DEFAULT_CODE
+        return {
+            "currency": cur,
+            "symbol": symbol(cur),
+            "tone": st.session_state.get("ai_tone") or "Strict Accountant",
+            "phase": st.session_state.get("financial_phase") or "Building Wealth",
+            "risk": st.session_state.get("risk_tolerance") or "Moderate",
+        }
+    except Exception:
+        return {"currency": DEFAULT_CODE, "symbol": symbol(DEFAULT_CODE),
+                "tone": "Strict Accountant", "phase": "Building Wealth",
+                "risk": "Moderate"}
+
+
+def _user_risk() -> str:
+    """The user's saved investment risk tolerance (defaults to Moderate)."""
+    try:
+        import streamlit as st
+        return st.session_state.get("risk_tolerance") or "Moderate"
+    except Exception:
+        return "Moderate"
 
 
 # ------------------------------------------------------------------- tools
@@ -84,7 +166,7 @@ def tool_portfolio_summary(supabase: Client, user_id: str) -> Dict:
     if not s["holdings"]:
         return {"status": "no_data", "note": "No investments added yet.",
                 "as_of": s["as_of"]}
-    health, insights = svc.get_health(user_id, "Moderate")
+    health, insights = svc.get_health(user_id, _user_risk())
     return {
         "status": "ok",
         "as_of": s["as_of"],
@@ -135,6 +217,7 @@ def tool_fire_status(supabase: Client, user_id: str) -> Dict:
 
 
 def tool_spending_summary(supabase: Client, user_id: str) -> Dict:
+    import datetime
     db = get_db_service(supabase)
     exp = db.get_historical_expenses(user_id, months_back=3)
     if exp.empty:
@@ -143,13 +226,30 @@ def tool_spending_summary(supabase: Client, user_id: str) -> Dict:
     exp = exp.assign(_m=exp["transaction_time"].dt.to_period("M"))
     monthly = exp.groupby("_m")["amount"].agg(["sum", "mean"]).reset_index()
     months = [str(r["_m"]) for r in monthly.to_dict("records")]
+
+    # Determine the actual month for the most recent data
+    current_month = datetime.datetime.now().month
+    current_year = datetime.datetime.now().year
+    last_period = monthly.iloc[-1]["_m"]
+    last_month_is_current = (last_period.year == current_year and last_period.month == current_month)
+
+    # Format the month name nicely for AI responses
+    month_names = ["", "January", "February", "March", "April", "May", "June",
+                   "July", "August", "September", "October", "November", "December"]
+    last_month_display = f"{month_names[last_period.month]} {last_period.year}"
+
     return {
         "status": "ok",
         "months_covered": months,
         "avg_monthly_expense": float(monthly["sum"].mean()),
         "last_month_expense": float(monthly.iloc[-1]["sum"]),
+        "last_month_name": last_month_display,  # e.g., "September 2026" for AI
+        "last_month_is_current": last_month_is_current,
+        "time_period_label": "this month's" if last_month_is_current else "last month's",
         "avg_monthly_income": 0,  # incomes are set by the service below when present
-        "note": "Expense figures only; income is captured via Net Worth / FIRE.",
+        "note": "Expense figures only; income is captured via Net Worth / FIRE. "
+                "Use 'time_period_label' to describe when the last_month_expense occurred - "
+                "say 'this month's' if last_month_is_current is true, otherwise 'last month's'.",
     }
 
 
@@ -187,5 +287,13 @@ def build_grounding(supabase: Client, user_id: str,
 
 
 def serialize_results(results: Dict[str, Dict]) -> str:
-    """JSON-serialize an already-built tool-results dict for the prompt."""
-    return _pprune(results)
+    """JSON-serialize an already-built tool-results dict for the prompt.
+
+    Stored-INR money amounts are re-expressed in the user's display currency
+    (identity when INR), and a `settings` block is appended so the model always
+    knows the currency, its symbol and the user's persona.
+    """
+    out = {name: _in_display_currency(name, data)
+           for name, data in (results or {}).items()}
+    out["settings"] = _user_settings()
+    return _pprune(out)

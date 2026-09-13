@@ -5,6 +5,7 @@ import joblib
 import plotly.express as px
 import hashlib
 from datetime import datetime
+from utils.currency import fmt_label, fmt_money
 
 # --- 1. LOAD THE CUSTOM ML MODEL ---
 @st.cache_resource
@@ -41,7 +42,7 @@ def legacy_goal_dialog(supabase, user_id):
     
     current_year = datetime.now().year
     
-    new_amount = st.number_input("Target Amount (₹)", min_value=100000, value=int(st.session_state.get('legacy_amount', 50000000)), step=1000000)
+    new_amount = st.number_input(fmt_label("Target Amount (₹)"), min_value=100000, value=int(st.session_state.get('legacy_amount', 50000000)), step=1000000)
     new_year = st.number_input("Target Year", min_value=current_year, max_value=2100, value=int(st.session_state.get('legacy_year', 2045)), step=1)
     
     if st.button("Save Goal", type="primary", use_container_width=True):
@@ -59,6 +60,18 @@ def legacy_goal_dialog(supabase, user_id):
             st.rerun()
         except Exception as e:
             st.error("Failed to save to database. Did you add the 'legacy_goal_amount' and 'legacy_goal_year' columns in Supabase?")
+
+@st.dialog("Revoke access")
+def confirm_revoke_access(supabase, member):
+    """Ask before permanently disconnecting a family member's federated link."""
+    st.warning(f"Revoke **{member['name']}**'s access? This will permanently "
+               "disconnect the federated link.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, revoke", type="primary", use_container_width=True):
+        supabase.table("family_connections").delete().eq("id", member['id']).execute()
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
 
 def render_page(supabase):
     my_id = st.session_state.user_id
@@ -207,7 +220,7 @@ def render_page(supabase):
     # ==========================================
     st.write("")
     col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
-    col_kpi1.metric("🏦 Aggregated Family Net Worth", f"₹{aggregated_wealth:,.0f}")
+    col_kpi1.metric("🏦 Aggregated Family Net Worth", fmt_money(aggregated_wealth))
     
     with col_kpi2:
         if not st.session_state.legacy_set:
@@ -215,7 +228,7 @@ def render_page(supabase):
             if st.button("Set Goal", type="primary", use_container_width=True):
                 legacy_goal_dialog(supabase, my_id)
         else:
-            st.metric(f"🎯 Legacy Transfer Goal ({int(st.session_state.legacy_year)})", f"₹{st.session_state.legacy_amount:,.0f}")
+            st.metric(f"🎯 Legacy Transfer Goal ({int(st.session_state.legacy_year)})", fmt_money(st.session_state.legacy_amount))
             if st.button("✏️ Edit Goal", use_container_width=True):
                 legacy_goal_dialog(supabase, my_id)
     
@@ -231,7 +244,7 @@ def render_page(supabase):
         if avg_health < 50:
             st.markdown(f"<div style='font-size: 0.85rem; color: {health_color}; margin-top: -15px;'><b>Action:</b> Severe liquidity shortfall. Halt discretionary spending and prioritize emergency savings.</div>", unsafe_allow_html=True)
         elif avg_health < 80:
-            st.markdown(f"<div style='font-size: 0.85rem; color: {health_color}; margin-top: -15px;'><b>Action:</b> Increase liquid savings. Aim for a ₹2L baseline per connected family member.</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size: 0.85rem; color: {health_color}; margin-top: -15px;'><b>Action:</b> Increase liquid savings. Aim for a {fmt_money(200000)} baseline per connected family member.</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div style='font-size: 0.85rem; color: {health_color}; margin-top: -15px;'><b>Status:</b> Optimal family liquidity maintained.</div>", unsafe_allow_html=True)
 
@@ -298,7 +311,7 @@ def render_page(supabase):
             st.markdown("### You")
             st.markdown(f"<span style='color: {'#16a34a' if my_health >= 80 else '#b45309'}; font-weight: bold;'>Health Score: {my_health}/100</span>", unsafe_allow_html=True)
             st.progress(my_health / 100)
-            st.markdown(f"**Your Corpus:** ₹{my_corpus:,.0f}")
+            st.markdown(f"**Your Corpus:** {fmt_money(my_corpus)}")
             st.caption("Transactions: Private 🔒")
 
     for i, member in enumerate(processed_members):
@@ -307,17 +320,13 @@ def render_page(supabase):
                 st.markdown(f"### {member['name']} ({member['role']})")
                 st.markdown(f"<span style='color: {'#16a34a' if member['health'] >= 80 else '#b45309'}; font-weight: bold;'>Health Score: {member['health']}/100</span>", unsafe_allow_html=True)
                 st.progress(member['health'] / 100)
-                st.markdown(f"**Shared Corpus:** ₹{member['corpus']:,.0f}")
+                st.markdown(f"**Shared Corpus:** {fmt_money(member['corpus'])}")
                 
                 c1, c2 = st.columns([2.5, 1.5])
                 c1.caption("Transactions: Private 🔒")
                 
-                with c2.popover("🗑️", help="Revoke Access"):
-                    st.markdown("**Revoke Access?**")
-                    st.caption("This will permanently disconnect the federated link.")
-                    if st.button("Confirm", key=f"del_act_{member['id']}", type="primary", use_container_width=True):
-                        supabase.table("family_connections").delete().eq("id", member['id']).execute()
-                        st.rerun()
+                if c2.button("🗑️", help="Revoke Access", use_container_width=True):
+                    confirm_revoke_access(supabase, member)
 
     st.write("---")
 
@@ -371,7 +380,7 @@ def render_page(supabase):
                 
                 with rc1:
                     st.markdown("<h4 style='color: var(--text-color); opacity: 0.7;'>Recommended Safe Corpus</h4>", unsafe_allow_html=True)
-                    st.markdown(f"<h1 style='color: var(--primary-color); font-size: 3rem; font-weight: 900; text-shadow: 0 2px 10px rgba(37,99,235,0.2);'>₹{recommended_corpus:,.0f}</h1>", unsafe_allow_html=True)
+                    st.markdown(f"<h1 style='color: var(--primary-color); font-size: 3rem; font-weight: 900; text-shadow: 0 2px 10px rgba(37,99,235,0.2);'>{fmt_money(recommended_corpus)}</h1>", unsafe_allow_html=True)
                     st.info("💡 **Recommendation:** Keep this amount in an ultra-short duration debt fund for instant liquidity.")
                 
                 with rc2:

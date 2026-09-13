@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from utils.ai_persona import persona_and_currency_note
 from utils.security import decrypt_data
+from utils.currency import fmt_money, to_display
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 
 # Initialize AI client
@@ -110,6 +112,8 @@ def render_page(supabase):
     # ✨ THE FIX 2: Convert Pandas Timestamps to normal strings so the Gemini API doesn't crash!
     safe_anomalies = anomalies.copy()
     safe_anomalies['transaction_time'] = safe_anomalies['transaction_time'].astype(str)
+    # Amounts are stored in INR — re-express in the display currency for the AI.
+    safe_anomalies['amount'] = safe_anomalies['amount'].apply(to_display)
     anomaly_summary = safe_anomalies[['transaction_time', 'description', 'category', 'amount', 'account_name', 'is_behavioral_anomaly', 'is_temporal_anomaly']].to_dict('records')
     
     # Initialize the session state properly if it doesn't exist
@@ -129,6 +133,8 @@ def render_page(supabase):
                     model = genai_client.GenerativeModel(target_model)
 
                     prompt = f"""
+                    {persona_and_currency_note()}
+
                     You are an expert fraud analyst and financial auditor. I used statistical Z-scores and time-bounds to flag these unusual transactions:
                     {anomaly_summary}
 
@@ -158,12 +164,12 @@ def render_page(supabase):
         for _, row in anomalies.iterrows():
             date_str = row['transaction_time'].strftime("%b %d, %Y at %I:%M %p")
             desc = str(row['description']).title()
-            amt = f"₹{row['amount']:,.2f}"
+            amt = fmt_money(row['amount'], dp=2)
             acc_name = row['account_name'] 
             
             tags = ""
             if row['is_behavioral_anomaly']:
-                avg = f"₹{row['mean']:,.0f}"
+                avg = fmt_money(row['mean'])
                 tags += f"<span style='background: rgba(231, 76, 60, 0.1); color: #e74c3c; border: 1px solid rgba(231, 76, 60, 0.2); padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-right: 8px;'>💰 Unusual Amount (Usually {avg})</span>"
             if row['is_temporal_anomaly']:
                 tags += f"<span style='background: rgba(59, 130, 246, 0.1); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.2); padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600;'>🌙 Late Night Swipe</span>"

@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 from utils.security import encrypt_data, decrypt_data
+from utils.currency import fmt_label, fmt_money
 from utils.anomaly_engine import check_and_alert_anomaly
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 import json
@@ -12,7 +13,28 @@ import tempfile
 import os
 
 # Initialize AI client
-genai_client = get_gemini_client() 
+genai_client = get_gemini_client()
+
+@st.dialog("Delete transactions")
+def confirm_bulk_delete(supabase):
+    """Ask before permanently deleting the selected transactions."""
+    count = len(st.session_state.selected_txns)
+    st.warning(f"⚠️ Are you sure you want to permanently delete **{count}** "
+               "selected transactions? This cannot be undone.")
+    c1, c2 = st.columns(2)
+    if c1.button("🗑️ Yes, delete", type="primary", use_container_width=True):
+        with st.spinner("Deleting records..."):
+            try:
+                ids_to_delete = list(st.session_state.selected_txns)
+                supabase.table("transactions").delete().in_("id", ids_to_delete).execute()
+                st.session_state.selected_txns.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to delete transactions: {e}")
+                return  # keep the dialog open so the error is visible
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
+
 
 def render_page(supabase):
     
@@ -25,7 +47,6 @@ def render_page(supabase):
     
     # ✨ ADDED: Bulk Delete State Trackers
     if 'selected_txns' not in st.session_state: st.session_state.selected_txns = set()
-    if 'confirm_bulk_delete' not in st.session_state: st.session_state.confirm_bulk_delete = False
 
     # --- Defined Callbacks Function ---
     def go_to_scanner():
@@ -286,9 +307,9 @@ def render_page(supabase):
 
             st.write("")
             col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
-            col_kpi1.metric("💰 Total Income", f"₹{total_income:,.2f}")
-            col_kpi2.metric("💸 Total Expenses", f"₹{total_expense:,.2f}")
-            col_kpi3.metric("🏦 Net", f"₹{net_savings:,.2f}")
+            col_kpi1.metric("💰 Total Income", fmt_money(total_income, dp=2))
+            col_kpi2.metric("💸 Total Expenses", fmt_money(total_expense, dp=2))
+            col_kpi3.metric("🏦 Net", fmt_money(net_savings, dp=2))
             st.write("") 
             
             if not filtered_df.empty:
@@ -303,7 +324,7 @@ def render_page(supabase):
                 fig_bar.update_layout(
                     margin=dict(t=10, b=10, l=10, r=10), 
                     xaxis_title="", 
-                    yaxis_title="Amount (₹)",
+                    yaxis_title=fmt_label("Amount (₹)"),
                     height=350,
                     xaxis={'categoryorder': 'array', 'categoryarray': trend_df['month_str'].unique()},
                     paper_bgcolor="rgba(0,0,0,0)",
@@ -338,7 +359,7 @@ def render_page(supabase):
                 del_col, _ = st.columns([1.5, 4])
                 with del_col:
                     if st.button(f"🗑️ Delete Selected ({len(st.session_state.selected_txns)})", type="primary", use_container_width=True):
-                        st.session_state.confirm_bulk_delete = True
+                        confirm_bulk_delete(supabase)
                 st.write("") # Padding
             
             list_df = df.copy()
@@ -391,10 +412,10 @@ def render_page(supabase):
                     
                     if row['type'] == 'Income':
                         amt_color = "#2ecc71" 
-                        amount_display = f"+₹{row['amount']:,.2f}"
+                        amount_display = f"+{fmt_money(row['amount'], dp=2)}"
                     else:
                         amt_color = "#e74c3c" 
-                        amount_display = f"-₹{row['amount']:,.2f}"
+                        amount_display = f"-{fmt_money(row['amount'], dp=2)}"
                         
                     category_styles = {
                         "Food & Dining": "background: var(--secondary-background-color); color: #db2777; border: 1px solid rgba(219,39,119,0.3); border-radius: 6px; padding: 4px 8px; font-size: 0.8rem;",
@@ -467,36 +488,6 @@ def render_page(supabase):
             
             else:
                 st.info("No transactions found matching your search and filters.")
-
-        # --- THE BULK DELETE CONFIRMATION MODAL ---
-        if st.session_state.confirm_bulk_delete:
-            st.write("---")
-            col_modal_info, col_modal_actions = st.columns([4, 1.2])
-            
-            with col_modal_info:
-                st.warning(f"⚠️ Are you sure you want to permanently delete **{len(st.session_state.selected_txns)}** selected transactions? This cannot be undone.")
-            
-            with col_modal_actions:
-                st.write("") 
-                c_btn1, c_btn2 = st.columns(2)
-                
-                if c_btn1.button("🗑️ Yes", key="modal_confirm_bulk_del_btn", type="primary", use_container_width=True):
-                    with st.spinner("Deleting records..."):
-                        try:
-                            ids_to_delete = list(st.session_state.selected_txns)
-                            supabase.table("transactions").delete().in_("id", ids_to_delete).execute()
-                            
-                            st.success(f"{len(ids_to_delete)} records successfully deleted!")
-                            st.session_state.selected_txns.clear()
-                            st.session_state.confirm_bulk_delete = False
-                            time.sleep(1)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to delete transactions: {e}")
-                
-                if c_btn2.button("Cancel", key="modal_cancel_bulk_del_btn", use_container_width=True):
-                    st.session_state.confirm_bulk_delete = False
-                    st.rerun()
 
     else:
         st.info("📊 No transactions found! Go to Dashboard or '➕ Add Transaction' button to log some data.")

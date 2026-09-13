@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
+from utils.ai_persona import persona_and_currency_note
+from utils.currency import fmt_money
 
 # Initialize AI client
 genai_client = get_gemini_client()
@@ -198,13 +200,13 @@ def render_page(supabase):
             st.markdown(f"""
             <div style="background: linear-gradient(145deg, var(--secondary-background-color), transparent); padding: 25px 20px; border-radius: 16px; text-align: center; border: 1px solid rgba(150, 150, 150, 0.2); margin-top: 15px; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
                 <p style="color: var(--text-color); opacity: 0.6; margin: 0; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Recommended Cover</p>
-                <h2 style="color: var(--primary-color); margin: 5px 0 0 0; font-size: 3rem; font-weight: 900;">₹{recommended_term_life:,.0f}</h2>
+                <h2 style="color: var(--primary-color); margin: 5px 0 0 0; font-size: 3rem; font-weight: 900;">{fmt_money(recommended_term_life)}</h2>
             </div>
             """, unsafe_allow_html=True)
             
             st.markdown("**How we calculated this:**")
-            st.caption(f"• **Human Life Value (HLV):** ₹{hlv:,.0f} (Based on ₹{annual_income:,.0f}/yr income)")
-            st.caption(f"• **Liability Clearance:** ₹{total_liability:,.0f} (Credit Cards & Loans)")
+            st.caption(f"• **Human Life Value (HLV):** {fmt_money(hlv)} (Based on {fmt_money(annual_income)}/yr income)")
+            st.caption(f"• **Liability Clearance:** {fmt_money(total_liability)} (Credit Cards & Loans)")
 
             st.write("")
             st.markdown("#### ✨ Top Market Matches")
@@ -217,7 +219,7 @@ def render_page(supabase):
                         st.caption(f"by {policy['provider']}")
                         st.markdown(f"<div style='background: var(--secondary-background-color); border: 1px solid rgba(150,150,150,0.2); color: var(--primary-color); padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; margin-top: 4px; display: inline-block;'>✓ {policy['features'][0]}</div>", unsafe_allow_html=True)
                     with pc2:
-                        st.markdown(f"<div style='text-align: right; color: var(--text-color); font-weight: 800; font-size: 1.2rem; margin-bottom: 8px;'>₹{policy['premium']}<span style='font-size:0.8rem; font-weight: 500; opacity:0.6;'>/mo</span></div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='text-align: right; color: var(--text-color); font-weight: 800; font-size: 1.2rem; margin-bottom: 8px;'>{fmt_money(policy['premium'])}<span style='font-size:0.8rem; font-weight: 500; opacity:0.6;'>/mo</span></div>", unsafe_allow_html=True)
                         search_url = f"https://www.google.com/search?q={policy['name'].replace(' ', '+')}+{policy['provider'].replace(' ', '+')}+insurance"
                         st.link_button("View Plan →", url=search_url, use_container_width=True)
 
@@ -229,13 +231,13 @@ def render_page(supabase):
             st.markdown(f"""
             <div style="background: linear-gradient(145deg, var(--secondary-background-color), transparent); padding: 25px 20px; border-radius: 16px; text-align: center; border: 1px solid rgba(150, 150, 150, 0.2); margin-top: 15px; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
                 <p style="color: var(--text-color); opacity: 0.6; margin: 0; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Recommended Cover</p>
-                <h2 style="color: var(--primary-color); margin: 5px 0 0 0; font-size: 3rem; font-weight: 900;">₹{recommended_health:,.0f}</h2>
+                <h2 style="color: var(--primary-color); margin: 5px 0 0 0; font-size: 3rem; font-weight: 900;">{fmt_money(recommended_health)}</h2>
             </div>
             """, unsafe_allow_html=True)
             
             st.markdown("**How we calculated this:**")
-            st.caption(f"• **Base Individual Cover:** ₹5,00,000")
-            st.caption(f"• **Dependent Add-on:** ₹{dependent_cover:,.0f} ({st.session_state.user_dependents} dependents)")
+            st.caption(f"• **Base Individual Cover:** {fmt_money(500000)}")
+            st.caption(f"• **Dependent Add-on:** {fmt_money(dependent_cover)} ({st.session_state.user_dependents} dependents)")
             
             st.markdown(f"<div style='font-size: 0.85rem; color: #e67e22; font-weight: 600; margin-top: 5px;'>{health_note}</div>", unsafe_allow_html=True)
 
@@ -250,7 +252,7 @@ def render_page(supabase):
                         st.caption(f"by {policy['provider']}")
                         st.markdown(f"<div style='background: var(--secondary-background-color); border: 1px solid rgba(150,150,150,0.2); color: var(--primary-color); padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; margin-top: 4px; display: inline-block;'>✓ {policy['features'][0]}</div>", unsafe_allow_html=True)
                     with hc2:
-                        st.markdown(f"<div style='text-align: right; color: var(--text-color); font-weight: 800; font-size: 1.2rem; margin-bottom: 8px;'>₹{policy['premium']}<span style='font-size:0.8rem; font-weight: 500; opacity:0.6;'>/mo</span></div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='text-align: right; color: var(--text-color); font-weight: 800; font-size: 1.2rem; margin-bottom: 8px;'>{fmt_money(policy['premium'])}<span style='font-size:0.8rem; font-weight: 500; opacity:0.6;'>/mo</span></div>", unsafe_allow_html=True)
                         search_url = f"https://www.google.com/search?q={policy['name'].replace(' ', '+')}+{policy['provider'].replace(' ', '+')}+health+insurance"
                         st.link_button("View Plan →", url=search_url, use_container_width=True)
 
@@ -269,10 +271,12 @@ def render_page(supabase):
         if st.button("Generate Personalized Advice", type="primary"):
             with st.spinner("Analyzing your financial profile with Gemini..."):
                 prompt = f"""
+                {persona_and_currency_note()}
+
                 You are a sympathetic, expert financial advisor. Review this user's profile and write a short, 2-paragraph summary explaining WHY they need this insurance.
                 Profile: Age {st.session_state.user_age}, {st.session_state.user_dependents} dependents.
-                Annual Income: ₹{annual_income}. Debt: ₹{total_liability}.
-                Recommended Term Life: ₹{recommended_term_life}. Recommended Health: ₹{recommended_health}.
+                Annual Income: {fmt_money(annual_income)}. Debt: {fmt_money(total_liability)}.
+                Recommended Term Life: {fmt_money(recommended_term_life)}. Recommended Health: {fmt_money(recommended_health)}.
                 Keep it professional, empathetic, and strictly financial. Do not use markdown formatting like **bold**, just pure text.
                 """
 
@@ -288,7 +292,7 @@ def render_page(supabase):
 
                 except Exception as e:
                     print(f"Gemini API Generation Error: {e}")
-                    fallback_text = f"Based on your profile as a {st.session_state.user_age}-year-old with {st.session_state.user_dependents} dependents, securing a Term Life cover of ₹{recommended_term_life:,.0f} is highly recommended. This ensures that your annual income of ₹{annual_income:,.0f} is replaced and your outstanding liabilities of ₹{total_liability:,.0f} are cleared if you are not around.\n\nAdditionally, a Health Insurance cover of ₹{recommended_health:,.0f} is crucial. {health_note} This protects your primary savings from being drained by sudden medical emergencies."
+                    fallback_text = f"Based on your profile as a {st.session_state.user_age}-year-old with {st.session_state.user_dependents} dependents, securing a Term Life cover of {fmt_money(recommended_term_life)} is highly recommended. This ensures that your annual income of {fmt_money(annual_income)} is replaced and your outstanding liabilities of {fmt_money(total_liability)} are cleared if you are not around.\n\nAdditionally, a Health Insurance cover of {fmt_money(recommended_health)} is crucial. {health_note} This protects your primary savings from being drained by sudden medical emergencies."
                     st.session_state.ai_advice = fallback_text
 
                 st.rerun()

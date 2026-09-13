@@ -4,6 +4,8 @@ import plotly.express as px
 import re
 from datetime import datetime, timedelta
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
+from utils.ai_persona import persona_and_currency_note
+from utils.currency import fmt_label, fmt_money
 from utils.security import decrypt_data
 
 # Initialize AI client
@@ -162,22 +164,22 @@ def render_page(supabase):
     
     col_main, col_sub = st.columns([1, 1])
     with col_main:
-        st.markdown(f"<h3 style='color: var(--text-color); opacity: 0.7;'>Micro-Transactions (<₹100) Total</h3>", unsafe_allow_html=True)
+        st.markdown(f"<h3 style='color: var(--text-color); opacity: 0.7;'>Micro-Transactions (<{fmt_money(100)}) Total</h3>", unsafe_allow_html=True)
         st.caption(f"Analyzing primary account: **{account_name}** | Period: **{time_filter}**")
-        st.markdown(f"<h1 style='color: #e74c3c; font-size: 4rem; font-weight: 900; text-shadow: 0 2px 10px rgba(231,76,60,0.2);'>₹{total_micro_spend:,.0f}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='color: #e74c3c; font-size: 4rem; font-weight: 900; text-shadow: 0 2px 10px rgba(231,76,60,0.2);'>{fmt_money(total_micro_spend)}</h1>", unsafe_allow_html=True)
         st.error(f"⚠️ **Warning:** {micro_spend_percentage:.1f}% of your total spending is disappearing in micro-transactions.")
 
     with col_sub:
         with st.container(border=True):
             st.markdown("#### The Invisible Drain")
-            st.markdown(f"**Total Expenses:** ₹{total_overall_spend:,.2f}")
-            st.markdown(f"**Micro-Spends (<₹100):** ₹{total_micro_spend:,.2f}")
+            st.markdown(f"**Total Expenses:** {fmt_money(total_overall_spend, dp=2)}")
+            st.markdown(f"**Micro-Spends (<{fmt_money(100)}):** {fmt_money(total_micro_spend, dp=2)}")
             st.markdown("---")
             
             # Prevent division by zero if there are no micro-spends
             avg_micro = micro_spends['amount'].mean() if not micro_spends.empty else 0.0
             
-            st.markdown(f"**Average UPI Micro-Spend Size:** ₹{avg_micro:,.2f}")
+            st.markdown(f"**Average UPI Micro-Spend Size:** {fmt_money(avg_micro, dp=2)}")
             st.markdown(f"**Total Number of Micro-Spends:** {len(micro_spends)}")
 
     st.write("---")
@@ -198,7 +200,7 @@ def render_page(supabase):
             
             fig.update_layout(
                 xaxis_title="", 
-                yaxis_title="Amount (₹)", 
+                yaxis_title=fmt_label("Amount (₹)"), 
                 showlegend=False,
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)"
@@ -220,17 +222,19 @@ def render_page(supabase):
                         model = genai_client.GenerativeModel(target_model)
 
                         top_categories = category_breakdown.head(3).to_dict('records')
-                        context_str = ", ".join([f"₹{cat['amount']} on {cat['smart_category']}" for cat in top_categories])
+                        context_str = ", ".join([f"{fmt_money(cat['amount'])} on {cat['smart_category']}" for cat in top_categories])
 
                         system_prompt = f"""
-                        You are a strict but helpful Indian financial auditor. The user has spent ₹{total_micro_spend}
-                        in the {time_filter.lower()} purely on micro-transactions under ₹100 via UPI.
+                        {persona_and_currency_note()}
+
+                        You are a strict but helpful Indian financial auditor. The user has spent {fmt_money(total_micro_spend)}
+                        in the {time_filter.lower()} purely on micro-transactions under {fmt_money(100)} via UPI.
 
                         Their top drains are: {context_str}.
 
                         Write a short, punchy 2-paragraph audit report.
                         In the first paragraph, call out their specific habits over this {time_filter.lower()} period.
-                        In the second paragraph, tell them exactly what that total ₹{total_micro_spend} could have bought them
+                        In the second paragraph, tell them exactly what that total {fmt_money(total_micro_spend)} could have bought them
                         in the Indian stock market (e.g., 'That's 2 units of a Nifty 50 Bluechip ETF' or 'That's X shares of Reliance').
                         Be specific, realistic with current market prices, and inspiring.
                         """

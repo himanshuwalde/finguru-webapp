@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin:0; padding:0; width:100%; height:1px; overflow:hidden; background:transparent; }
+</style>
+</head>
+<body>
+<script>
+// FinGuru auth-autofill reader component.
+//
+// Streamlit's text_input is a controlled React input. When a password manager
+// writes into the visible field, Streamlit's state sometimes never learns the
+// new value and the next re-render wipes the field to "" — so a submit sends
+// empty credentials even though the fields looked filled.
+//
+// This component captures the live values at the moment the field changes
+// (memory that React cannot wipe) and reports them back to Python on the next
+// render, so the app can adopt them into session_state before building the
+// widgets. It also re-applies the captured values to the visible inputs
+// (cosmetic only, never while the user is focused on that field) so the fields
+// stay visually filled until Streamlit's re-render catches up.
+//
+// IMPORTANT: values are only POSTED when they CHANGE. Posting from the
+// `streamlit:render` handler unconditionally creates a host<->iframe feedback
+// loop (~tens of thousands of messages/sec), which pegs the renderer and starves
+// delivery. (Discovered by instrumentation: posts counter hit ~125k in 3s.)
+//
+// Wire protocol (same as recovery_reader): raw postMessage to the host.
+(function () {
+  var captured = { email: "", password: "" };
+  var hookedFields = { email: false, password: false };
+  var readySent = false;
+  var lastEmitted = null;   // serialized form of what we last posted
+
+  function post(type, payload) {
+    var msg = { isStreamlitMessage: true, type: type };
+    if (payload) for (var k in payload) msg[k] = payload[k];
+    try { window.parent.postMessage(msg, "*"); } catch (e) {}
+  }
+
+  // Only emit when the semantic value actually changed — otherwise the host
+  // re-renders and pings us back, and we loop forever.
+  function emit() {
+    var value = { email: captured.email, password: captured.password, error: null };
+    var keyStr = JSON.stringify(value);
+    if (keyStr === lastEmitted) return;
+    lastEmitted = keyStr;
+    if (!readySent) {
+      readySent = true;
+      post("streamlit:componentReady", { apiVersion: 1 });
+    }
+    post("streamlit:setComponentValue", { value: value, dataType: "json" });
+    post("streamlit:setFrameHeight", { height: 1 });
+  }
+
+  function onFieldInput(ev) {
+    var t = ev && ev.target;
+    if (!t || !t.value) return;
+    var tag = t.getAttribute ? (t.getAttribute("aria-label") || "") : "";
+    if (tag === "Email" || /email/i.test(tag)) {
+      if (captured.email !== t.value) { captured.email = t.value; emit(); }
+    } else if ((t.type || "").toLowerCase() === "password") {
+      if (captured.password !== t.value) { captured.password = t.value; emit(); }
+    }
+  }
+
+  // Keep the visible fields in sync with captured (React may have wiped them).
+  // Never overwrite while the user is actively editing that field.
+  function restore() {
+    try {
+      var doc = window.parent.document;
+      var email = doc.querySelector('input[aria-label="Email"]');
+      var pwd = doc.querySelector('input[type="password"]');
+      if (email && captured.email && doc.activeElement !== email && email.value !== captured.email) {
+        email.value = captured.email;
+      }
+      if (pwd && captured.password && doc.activeElement !== pwd && pwd.value !== captured.password) {
+        pwd.value = captured.password;
+      }
+    } catch (e) {}
+  }
+
+  function hook() {
+    var doc;
+    try { doc = window.parent.document; } catch (e) { return; }
+    // Document-level delegation: catches fills on fields that are created (and
+    // re-created by Streamlit reruns) after this component mounts.
+    if (!hookedFields.email) {
+      hookedFields.email = true;
+      doc.addEventListener("input", onFieldInput, true);
+      doc.addEventListener("change", onFieldInput, true);
+    }
+    // Seed capture from whatever the fields already hold right now.
+    var email = doc.querySelector('input[aria-label="Email"]');
+    var pwd = doc.querySelector('input[type="password"]');
+    if (email && email.value && captured.email !== email.value) {
+      captured.email = email.value;
+      emit();
+    }
+    if (pwd && pwd.value && captured.password !== pwd.value) {
+      captured.password = pwd.value;
+      emit();
+    }
+  }
+
+  try { hook(); } catch (e) {}
+  emit();
+
+  window.addEventListener("message", function (evt) {
+    try {
+      var d = evt.data || evt.detail;
+      if (d && d.type === "streamlit:render") {
+        hook();
+        emit();   // no-op unless values changed
+        restore();
+      }
+    } catch (e) {}
+  });
+
+  // Poll: hook() seeds from the live DOM (covers non-event fills such as some
+  // password-manager writes), restore() repaints what React wiped. emit() only
+  // fires when a value actually changed, so no host<->iframe feedback loop.
+  setInterval(function () {
+    try { hook(); restore(); } catch (e) {}
+  }, 500);
+})();
+</script>
+</body>
+</html>

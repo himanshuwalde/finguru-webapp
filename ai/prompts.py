@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import List, Dict
 
+from utils.currency import fmt_money
+
 SYSTEM_PROMPT = """You are **CA Guru**, FinGuru's chartered-accountant assistant. \
 You explain *computed* numbers — you never compute them yourself.
 
@@ -28,14 +30,29 @@ say which assumption you made (e.g. "assumed 4% safe withdrawal rate").
 
 def build_prompt(user_message: str,
                  grounding_json: str,
-                 history: List[Dict]) -> str:
-    """Assemble the full prompt: system rules + grounding + conversation."""
+                 history: List[Dict],
+                 persona_block: str = "",
+                 currency_note: str = "") -> str:
+    """Assemble the full prompt: system rules + persona/currency + grounding +
+    conversation. `persona_block` and `currency_note` are optional strict
+    instructions injected before the data."""
     turns = []
     for m in history:
         turns.append(f"{m['role'].upper()}: {m['content']}")
     history_str = "\n".join(turns[-6:]) if turns else "No prior turns."
 
+    persona_section = persona_block if persona_block.strip() else (
+        "PERSONA: You are a neutral, strictly professional financial assistant.")
+    currency_section = currency_note if currency_note.strip() else (
+        "Use proper currency symbols/labels for every amount you mention.")
+
     return f"""{SYSTEM_PROMPT}
+
+============================== PERSONA ==============================
+{persona_section}
+
+=========================== CURRENCY RULE ===========================
+{currency_section}
 
 ========== GROUNDING DATA (user's real computed figures) ==========
 {grounding_json}
@@ -73,7 +90,7 @@ def deterministic_answer(intent: str, results: Dict[str, Dict]) -> str:
     tax = results.get("tax_calculator", {})
     if tax.get("status") == "ok":
         lines.append(f"Recommended tax regime: {tax['recommended_regime'].upper()} "
-                     f"(saving ₹{tax['potential_saving']:,.0f}).")
+                     f"(saving {fmt_money(tax['potential_saving'])}).")
     opp = results.get("tax_saving_opportunities", {})
     if opp.get("status") == "ok" and opp.get("opportunities"):
         lines.append("Tax-saving gaps: " + "; ".join(opp["opportunities"]))
@@ -92,4 +109,4 @@ def deterministic_answer(intent: str, results: Dict[str, Dict]) -> str:
 
 
 def _inr(v) -> str:
-    return f"₹{float(v):,.0f}"
+    return fmt_money(float(v))

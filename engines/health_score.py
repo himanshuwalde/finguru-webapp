@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from utils.currency import fmt_money
+
 # Weight → score key. Kept as data so the formula is transparent for the viva.
 WEIGHTS = [
     ("savings", "Savings Rate", 0.25),
@@ -113,7 +115,7 @@ def _flags(scores: Dict[str, float], f: Dict) -> List[Dict]:
     if f.get("has_tax_data") and (f.get("potential_tax_saving", 0.0) or 0.0) > 0:
         flags.append({"severity": "warning",
                       "message": f"The {f.get('recommended_regime','new').upper()} "
-                                 f"regime could save ₹{f['potential_tax_saving']:,.0f}."})
+                                 f"regime could save {fmt_money(f['potential_tax_saving'])}."})
     if f.get("has_fire_data") and f.get("fire_probability_pct", 0.0) < 40:
         flags.append({"severity": "warning",
                       "message": f"Only {f['fire_probability_pct']:.0f}% Monte-Carlo "

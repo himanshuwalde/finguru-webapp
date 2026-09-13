@@ -13,11 +13,21 @@ import streamlit as st
 
 from engines import fire_engine
 from services.fire_service import get_fire_service
+from utils.currency import fmt_label, fmt_money, symbol, to_inr
 from utils.ui_components import render_gradient_header, render_alert_banner
 
 
-def _inr(v) -> str:
-    return f"₹{v:,.0f}"
+@st.dialog("Clear last result")
+def confirm_clear_last_result():
+    """Ask before wiping the current FIRE simulation result."""
+    st.warning("Clear the current FIRE simulation result? "
+               "You'll have to run the simulation again.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, clear", type="primary", use_container_width=True):
+        st.session_state.fire_result = None
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True):
+        st.rerun()
 
 
 def render_page(supabase):
@@ -39,10 +49,10 @@ def render_page(supabase):
         cur_age = st.number_input("Current age", 18, 80,
                                   int(saved.get("current_age", 22)), key="fr_age")
         expense = st.number_input(
-            "Monthly expense (₹)", 0.0, 1e7,
+            fmt_input_label("Monthly expense"), 0.0, 1e7,
             float(avg_expense if avg_expense else saved.get("monthly_expense", 30000)),
             key="fr_exp")
-        corpus = st.number_input("Current corpus (₹)", 0.0, 1e11,
+        corpus = st.number_input(fmt_input_label("Current corpus"), 0.0, 1e11,
                                  float(saved.get("current_corpus", 0)), key="fr_corpus")
         ret = st.number_input("Expected return (% p.a.)", 0.0, 25.0,
                               float(saved.get("expected_return_pct", 10)), key="fr_ret")
@@ -50,7 +60,7 @@ def render_page(supabase):
         target_age = st.number_input("Target retirement age", cur_age, 90,
                                      int(saved.get("target_retirement_age", 45)),
                                      key="fr_target")
-        invest = st.number_input("Monthly investment (₹)", 0.0, 1e7,
+        invest = st.number_input(fmt_input_label("Monthly investment"), 0.0, 1e7,
                                  float(saved.get("monthly_investment", 20000)),
                                  key="fr_invest")
         infl = st.number_input("Inflation (% p.a.)", 0.0, 15.0,
@@ -69,10 +79,11 @@ def render_page(supabase):
     c1, c2 = st.columns(2)
     if c1.button("▶️ Save profile & run FIRE simulation",
                  type="primary", use_container_width=True):
+        # Convert from user's display currency to INR for storage
         payload = {
             "current_age": cur_age, "target_retirement_age": target_age,
-            "monthly_expense": expense, "monthly_investment": invest,
-            "current_corpus": corpus, "expected_return_pct": ret,
+            "monthly_expense": to_inr(expense), "monthly_investment": to_inr(invest),
+            "current_corpus": to_inr(corpus), "expected_return_pct": ret,
             "inflation_pct": infl, "safe_withdrawal_rate_pct": swr,
             "volatility_pct": vol, "n_simulations": int(n_sims),
         }
@@ -86,8 +97,7 @@ def render_page(supabase):
                        "Tables `fire_profiles`/`fire_simulations` must exist.")
     with c2:
         if st.button("🗑 Clear last result", use_container_width=True):
-            st.session_state.fire_result = None
-            st.rerun()
+            confirm_clear_last_result()
 
     result = st.session_state.get("fire_result")
     if not result:
@@ -98,8 +108,8 @@ def render_page(supabase):
         if history:
             st.markdown("##### Recent FIRE runs")
             hrows = [{"Target age": h["target_age"],
-                      "Required corpus": _inr(h["required_corpus"]),
-                      "Median corpus": _inr(h["projected_corpus"]),
+                      "Required corpus": fmt_money(h["required_corpus"]),
+                      "Median corpus": fmt_money(h["projected_corpus"]),
                       "P(FIRE)": f"{h['probability_pct']:.0f}%",
                       "Run at": h["created_at"][:10]} for h in history]
             st.dataframe(pd.DataFrame(hrows), use_container_width=True, hide_index=True)
@@ -119,18 +129,18 @@ def render_page(supabase):
     st.progress(min(prob / 100.0, 1.0))
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Required corpus @ retirement", _inr(result["required_corpus"]))
-    c2.metric("Median projected corpus", _inr(result["median_corpus"]),
+    c1.metric("Required corpus @ retirement", fmt_money(result["required_corpus"]))
+    c2.metric("Median projected corpus", fmt_money(result["median_corpus"]),
               f"{result['shortfall_vs_median']:,.0f} short" if not result["on_track"]
               else "✅ on track")
-    c3.metric("p5 pessimist", _inr(result["p5_corpus"]))
-    c4.metric("p95 optimist", _inr(result["p95_corpus"]))
+    c3.metric("p5 pessimist", fmt_money(result["p5_corpus"]))
+    c4.metric("p95 optimist", fmt_money(result["p95_corpus"]))
 
     stat = st.columns(4)
     stat[0].metric("Projected FIRE age", f"{result['projected_fire_age'] or '∎'}")
     stat[1].metric("Years to FIRE", f"{result['years_to_retirement']:.0f}")
-    stat[2].metric("Monthly expense then", _inr(result["future_monthly_expense"]))
-    stat[3].metric("Annual expense then", _inr(result["annual_expense_at_retirement"]))
+    stat[2].metric("Monthly expense then", fmt_money(result["future_monthly_expense"]))
+    stat[3].metric("Annual expense then", fmt_money(result["annual_expense_at_retirement"]))
 
     # segmentation of "on track" narrative
     if result["on_track"]:
@@ -138,7 +148,7 @@ def render_page(supabase):
         msg += "corpus clears the bar — you're likely on the path to FIRE."
     else:
         msg = f"Median corpus falls short of the target by "
-        msg += _inr(result["shortfall_vs_median"]) + "."
+        msg += fmt_money(result["shortfall_vs_median"]) + "."
     render_alert_banner(msg, "success" if result["on_track"] else "warning")
 
     # ------------------------------------------------------- histogram draw
@@ -151,14 +161,14 @@ def render_page(supabase):
                                marker_color="#F59E0B", opacity=0.7, name="trials"))
     fig.add_vline(x=result["required_corpus"] / 1e6,
                   line=dict(color="#EF4444", width=3, dash="dash"),
-                  annotation_text=f'Required {_inr(result["required_corpus"])}',
+                  annotation_text=f'Required {fmt_money(result["required_corpus"])}',
                   annotation_position="top left")
     fig.add_vline(x=result["median_corpus"] / 1e6,
                   line=dict(color="#22C55E", width=3),
-                  annotation_text=f'Median {_inr(result["median_corpus"])}',
+                  annotation_text=f'Median {fmt_money(result["median_corpus"])}',
                   annotation_position="top right")
     fig.update_layout(height=360, margin=dict(t=10, b=10, l=10, r=10),
-                      xaxis_title="Terminal corpus (₹ millions)",
+                      xaxis_title=f"Terminal corpus ({symbol()} millions)",
                       yaxis_title="Trials",
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                       showlegend=False)
@@ -169,9 +179,9 @@ def render_page(supabase):
     if history:
         st.markdown("##### Recent FIRE runs")
         hrows = [{"Target age": h["target_age"],
-                  "Required corpus": _inr(h["required_corpus"]),
-                  "Median corpus": _inr(h["projected_corpus"]),
+                  "Required corpus": fmt_money(h["required_corpus"]),
+                  "Median corpus": fmt_money(h["projected_corpus"]),
                   "P(FIRE)": f"{h['probability_pct']:.0f}%",
-                  "p5–p95": f"{_inr(h['p5'])} – {_inr(h['p95'])}",
+                  "p5–p95": f"{fmt_money(h['p5'])} – {fmt_money(h['p95'])}",
                   "Run at": h["created_at"][:10]} for h in history]
         st.dataframe(pd.DataFrame(hrows), use_container_width=True, hide_index=True)

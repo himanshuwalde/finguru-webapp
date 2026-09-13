@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin:0; padding:0; width:100%; height:1px; overflow:hidden; background:transparent; }
+</style>
+</head>
+<body>
+<script>
+// FinGuru session-persistence component.
+//
+// Streamlit's session_state is recreated on every page refresh, so a refresh
+// silently drops the login and strands the user on the landing page. To survive
+// a refresh, the app keeps a small copy of the Supabase session in the browser
+// through this component — a key-value store with two out-of-band channels:
+//
+//   * same-origin cookie   — the FAST path. Written with path=/, so the browser
+//     sends it on the next refresh request and Python reads it straight out of
+//     the request headers on the very FIRST run — the restored session is armed
+//     before anything renders, so a refresh never flashes the landing page.
+//
+//   * localStorage mirror  — the FALLBACK. If the cookie header is unavailable
+//     (proxied/cloud cache stripping), the component re-reads localStorage and
+//     posts it back to Python, which re-arms the session on the next rerun.
+//
+// Python drives writes purely through component args:
+//     session_keep(store="<json string>")   persist this blob (cookie + local)
+//     session_keep(clear=True)              erase both channels
+//     session_keep()                        read-only (report current value)
+// The return value is always the currently-persisted session (or null).
+//
+// Security note: persisting an OAuth access/refresh token in the browser is what
+// Supabase's own JS client does for every SPA (its default storage is
+// localStorage). The cookie is SameSite=Lax and Secure on https; nothing goes in
+// the URL or into server logs.
+//
+// IMPORTANT (same constraint that bit auth_autofill_reader): only POST to the
+// host when the value actually changed, and never post unconditionally inside
+// the `streamlit:render` handler — that creates a host<->iframe feedback loop
+// that pegs the renderer (~100k msgs/sec) and starves delivery of replies.
+(function () {
+  var KEY = "finguru_session";       // localStorage key
+  var COOKIE = "finguru_session";    // cookie name (shares the app origin)
+  var readySent = false;
+  var lastEmitted = null;  // serialized value of the last post to Python
+  var lastStored  = null;  // serialized value of the last store we applied
+
+  function post(type, payload) {
+    var msg = { isStreamlitMessage: true, type: type };
+    if (payload) for (var k in payload) msg[k] = payload[k];
+    try { window.parent.postMessage(msg, "*"); } catch (e) {}
+  }
+
+  function readLocal() {
+    try { return window.localStorage.getItem(KEY) || ""; } catch (e) { return ""; }
+  }
+
+  function clearAll() {
+    try { window.localStorage.removeItem(KEY); } catch (e) {}
+    // Remove the cookie on our chain AND on the parent (both are app-origin).
+    var gone = COOKIE + "=; path=/; max-age=0; SameSite=Lax";
+    try { document.cookie = gone; } catch (e) {}
+    try { window.parent.document.cookie = gone; } catch (e) {}
+  }
+
+  function writeCookie(s) {
+    var secure = /^https:/i.test(window.location.protocol || "") ? "; Secure" : "";
+    var c = COOKIE + "=" + encodeURIComponent(s) +
+            "; path=/; SameSite=Lax; max-age=2419200" + secure;
+    try { document.cookie = c; } catch (e) {}
+    try { window.parent.document.cookie = c; } catch (e) {}
+  }
+
+  // Apply whatever write the host asked for — but only when it changed, so we
+  // stay quiet (no posting, no cookie churn) across unrelated reruns.
+  function applyWrite(store, clear) {
+    if (clear) {
+      if (readLocal() !== "" || lastStored !== null) {
+        lastStored = null;
+        clearAll();
+      }
+      return;
+    }
+    if (!store) return;
+    if (store === lastStored) return;
+    lastStored = store;
+    try { window.localStorage.setItem(KEY, store); } catch (e) {}
+    writeCookie(store);
+  }
+
+  // Report the currently-persisted session to Python, but ONLY when it changed
+  // (change-gated posting is what keeps the feedback loop away).
+  function emit() {
+    var value = { session: null, error: null };
+    var raw = readLocal();
+    if (raw) {
+      try { value.session = JSON.parse(raw); } catch (e) { value.error = "bad-store"; }
+    }
+    var keyStr = JSON.stringify(value);
+    if (keyStr === lastEmitted) return;
+    lastEmitted = keyStr;
+    if (!readySent) {
+      readySent = true;
+      post("streamlit:componentReady", { apiVersion: 1 });
+    }
+    post("streamlit:setComponentValue", { value: value, dataType: "json" });
+    post("streamlit:setFrameHeight", { height: 1 });
+  }
+
+  window.addEventListener("message", function (evt) {
+    try {
+      var d = evt.data || {};
+      if (d.type !== "streamlit:render") return;
+      var args = (d.args && typeof d.args === "object") ? d.args : {};
+      applyWrite(args.store || "", !!args.clear);
+    } catch (e) {}
+    try { emit(); } catch (e) {}
+  });
+
+  // First mount: report whatever the browser already holds (localStorage may
+  // carry a session from a previous visit), so the host can adopt it.
+  setTimeout(emit, 0);
+})();
+</script>
+</body>
+</html>
