@@ -13,7 +13,7 @@ import streamlit as st
 
 from engines import fire_engine
 from services.fire_service import get_fire_service
-from utils.currency import fmt_label, fmt_money, symbol, to_inr
+from utils.currency import fmt_input_label, fmt_label, fmt_money, symbol, to_inr
 from utils.ui_components import render_gradient_header, render_alert_banner
 
 
