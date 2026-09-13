@@ -39,6 +39,78 @@ import os as _os
 _RECOVERY_READER_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "recovery_reader")
 _recovery_reader = components.declare_component("recovery_reader", path=_RECOVERY_READER_DIR)
 
+
+# ==========================================
+# ✨ AUTH AUTOFILL ENHANCER
+# Streamlit renders st.text_input as standalone widgets with autocomplete="off"
+# and no name/association, so browsers refuse to treat Email+Password as a
+# login form. This template (injected as a components.html script) links the
+# two inputs to one hidden native <form> via the `form` attribute and sets
+# proper autocomplete/name, which makes password managers autofill the saved
+# password when the email is filled. __AUTH_MODE__ is substituted per render.
+# ==========================================
+_AUTH_AUTOFILL_SCRIPT = """
+<script>
+(function() {
+    var MODE = "__AUTH_MODE__";
+    var FORM_ID = "st_auth_autofill_form";
+    var done = false, attempts = 0;
+
+    function wire(win) {
+        if (done) return;
+        var doc = win.document;
+        var email = doc.querySelector('input[aria-label="Email"]');
+        var pwd = (MODE === "update_pwd")
+            ? doc.querySelector('input[type="password"]')
+            : doc.querySelector('input[aria-label="Password"][type="password"]');
+        if (!email && !pwd) { attempts++; return; }
+        done = true;
+
+        // One hidden form that the fields are ASSOCIATED with (form= attr), so
+        // the browser sees them as a single credential form without us touching
+        // Streamlit's own DOM tree.
+        var form = doc.getElementById(FORM_ID);
+        if (!form) {
+            form = doc.createElement("form");
+            form.id = FORM_ID;
+            form.setAttribute("aria-hidden", "true");
+            form.style.cssText = "position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;";
+            var sb = doc.createElement("button");
+            sb.type = "submit";
+            sb.style.cssText = "display:none;";
+            form.appendChild(sb);
+            doc.body.appendChild(form);
+        }
+
+        function apply(field, name, auto) {
+            if (!field) return;
+            field.setAttribute("form", FORM_ID);
+            field.setAttribute("name", name);
+            field.setAttribute("autocomplete", auto);
+        }
+
+        if (email) apply(email, "email", (MODE === "signup" || MODE === "reset") ? "email" : "username");
+        if (pwd) apply(pwd, "password", MODE === "login" ? "current-password" : "new-password");
+
+        // Enter inside an autofilled field should submit the mode's action.
+        if (!form.dataset.stAutoReady) {
+            form.dataset.stAutoReady = "1";
+            form.addEventListener("submit", function (ev) {
+                ev.preventDefault();
+                var btn = doc.querySelector('button[kind="primaryFormSubmit"]');
+                if (btn) btn.click();
+            });
+        }
+    }
+
+    var iv = setInterval(function () {
+        try { wire(window.parent); } catch (e) {}
+        if (done || ++attempts > 60) clearInterval(iv);
+    }, 250);
+})();
+</script>
+"""
+
 # ==========================================
 # ✨ SIDEBAR THEME FIX
 # Strategy: Inject a <style> tag directly into the PARENT document
@@ -838,6 +910,13 @@ elif st.session_state.show_auth_page:
                             st.error(f"Failed to update password. Did you click the link in your email? Error: {e}")
                 st.write("---")
                 st.button("← Back to Log In", use_container_width=True, on_click=lambda: st.session_state.update(auth_mode='login'))
+
+        # Enable browser password-manager autofill on whichever auth form is
+        # showing (login/signup/reset/update_pwd).
+        components.html(
+            _AUTH_AUTOFILL_SCRIPT.replace("__AUTH_MODE__", st.session_state.auth_mode),
+            height=0,
+        )
 
 else:
     # ==========================================
