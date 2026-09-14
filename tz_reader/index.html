@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin:0; padding:0; width:100%; height:1px; overflow:hidden; background:transparent; }
+</style>
+</head>
+<body>
+<script>
+// FinGuru browser-timezone reader.
+//
+// Streamlit Cloud runs the Python server in UTC, so `datetime.now()` reports
+// the server's clock — wrong for the user's "Good morning/afternoon/evening"
+// greeting (8 PM IST reads as 2:30 PM UTC → "Good Afternoon"). This component
+// reads the visitor's real IANA timezone from their browser and posts it once.
+//
+// Same anti-feedback-loop rule as session_keep / auth_autofill_reader: post to
+// the host ONLY when the value (or the ready flag) actually changes, and never
+// post unconditionally from the `streamlit:render` handler.
+(function () {
+  var readySent = false;
+  var lastEmitted = null;
+
+  function tz() {
+    try {
+      var v = window.Intl.DateTimeFormat().resolvedOptions().timeZone;
+      return (v && typeof v === "string" && v.length) ? v : null;
+    } catch (e) { return null; }
+  }
+  // Hour (0-23) in the visitor's local time — the primitive the greeting needs.
+  function localHour() {
+    try { return new Date().getHours(); } catch (e) { return null; }
+  }
+
+  function emit() {
+    var value = { timeZone: tz(), hour: localHour(), error: null };
+    if (value.timeZone === null && value.hour === null) value.error = "tz-unsupported";
+    var keyStr = JSON.stringify(value);
+    if (keyStr === lastEmitted) return;
+    lastEmitted = keyStr;
+    if (!readySent) {
+      readySent = true;
+      post("streamlit:componentReady", { apiVersion: 1 });
+    }
+    post("streamlit:setComponentValue", { value: value, dataType: "json" });
+    post("streamlit:setFrameHeight", { height: 1 });
+  }
+
+  function post(type, payload) {
+    var msg = { isStreamlitMessage: true, type: type };
+    if (payload) for (var k in payload) msg[k] = payload[k];
+    try { window.parent.postMessage(msg, "*"); } catch (e) {}
+  }
+
+  window.addEventListener("message", function (evt) {
+    try {
+      var d = evt.data || {};
+      if (d.type !== "streamlit:render") return;
+    } catch (e) {}
+    try { emit(); } catch (e) {}
+  });
+
+  setTimeout(emit, 0);   // report on first mount
+  setTimeout(emit, 250); // re-read the hour ~1 frame later (covers slow mounts)
+})();
+</script>
+</body>
+</html>

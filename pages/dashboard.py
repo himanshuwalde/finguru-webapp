@@ -1,14 +1,25 @@
+import os
+import json
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import plotly.express as px
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-import json
+from zoneinfo import ZoneInfo
 from utils.ai_persona import persona_and_currency_note
 from utils.currency import fmt_label, fmt_money, symbol, to_display
 from utils.security import decrypt_data
 from services import recommendation_service
+
+# Browser timezone reader — Streamlit Cloud runs Python in UTC, so a greeting
+# needs the visitor's local clock, not the server's (8 PM IST must say Evening
+# even though it's 2:30 PM in the server's UTC). The tiny tz_reader/ component
+# reports the browser IANA timezone + local hour once per mount.
+_TZ_READER_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tz_reader")
+_tz_reader = components.declare_component("tz_reader", path=_TZ_READER_DIR)
+_DEFAULT_TZ = "Asia/Kolkata"  # app is India-focused (₹, NSE); sane fallback
 
 # ==========================================
 # 🧠 ML BUDGET ENGINE
@@ -117,16 +128,50 @@ def render_page(supabase):
     def go_to_scanner():
         st.session_state.force_page = "add_transaction"
 
-    # --- GREETING WITH DATE ---
-    now = datetime.now()
-    hour = now.hour
+    # --- GREETING WITH DATE (browser-local time) ---
+    # Streamlit Cloud's server clock is UTC, so datetime.now() alone can't tell
+    # the user's local hour — 8 PM IST renders as 14:30 UTC → "Good Afternoon".
+    # tz_reader/ reports the browser's IANA timezone + local hour from JS; we
+    # cache it and fall back to Asia/Kolkata (India-focused app) then UTC.
+    tz_info = st.session_state.get("_tz_info")
+    if not isinstance(tz_info, dict):
+        tz_info = _tz_reader()
+        if isinstance(tz_info, dict) and tz_info.get("timeZone"):
+            st.session_state["_tz_info"] = tz_info
+
+    tz_name = None
+    hour = None
+    if isinstance(tz_info, dict):
+        tz_name = tz_info.get("timeZone") or None
+        if tz_info.get("hour") is not None:
+            hour = int(tz_info["hour"])
+
+    if tz_name:
+        try:
+            local_now = datetime.now(ZoneInfo(tz_name))
+            if hour is None:
+                hour = local_now.hour
+        except Exception:
+            try:
+                local_now = datetime.now(ZoneInfo(_DEFAULT_TZ))
+            except Exception:
+                local_now = datetime.now()
+    else:
+        try:
+            local_now = datetime.now(ZoneInfo(_DEFAULT_TZ))
+        except Exception:
+            local_now = datetime.now()
+
+    if hour is None:
+        hour = local_now.hour
+    date_str = local_now.strftime("%b %d, %Y")
+
     if hour < 12:
         greeting = "Good Morning"
     elif hour < 17:
         greeting = "Good Afternoon"
     else:
         greeting = "Good Evening"
-    date_str = now.strftime("%b %d, %Y")
     # Use the user's full name from profiles if available, otherwise fall back to email
     try:
         prof_res = supabase.table("profiles").select("full_name").eq("id", st.session_state.user_id).execute()
