@@ -65,25 +65,10 @@ def get_market_health_policies(cover_amount, dependents):
 def render_page(supabase):
     # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags
     st.markdown("""
-        <style>
-        .insurance-header-title {
-            margin: 0 !important; 
-            padding: 0 !important; 
-            background: linear-gradient(45deg, #2563EB, #9333EA) !important; 
-            -webkit-background-clip: text !important; 
-            background-clip: text !important; 
-            -webkit-text-fill-color: transparent !important; 
-            color: transparent !important; 
-            display: inline-block !important; 
-            width: fit-content !important;
-        }
-        </style>
-        
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">🛡️</div>
-            <h1 class="insurance-header-title">AI Insurance Advisor</h1>
-        </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Discover exactly how much coverage your family needs based on your actual lifestyle.</p>
+        <div class="page-header">
+        <h2>AI Insurance Advisor</h2>
+        <p>Discover exactly how much coverage your family needs based on your actual lifestyle.</p>
+    </div>
     """, unsafe_allow_html=True)
 
     # --- 1. COLLECT USER PROFILE DATA ---
@@ -198,9 +183,9 @@ def render_page(supabase):
             st.markdown("To protect your family's lifestyle and clear outstanding debts if you are not around.")
             
             st.markdown(f"""
-            <div style="background: linear-gradient(145deg, var(--secondary-background-color), transparent); padding: 25px 20px; border-radius: 16px; text-align: center; border: 1px solid rgba(150, 150, 150, 0.2); margin-top: 15px; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
+            <div style="background: var(--secondary-background-color); padding: 18px 20px; border-radius: 8px; text-align: center; border: 1px solid rgba(150, 150, 150, 0.15); margin: 12px 0;">
                 <p style="color: var(--text-color); opacity: 0.6; margin: 0; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Recommended Cover</p>
-                <h2 style="color: var(--primary-color); margin: 5px 0 0 0; font-size: 3rem; font-weight: 900;">{fmt_money(recommended_term_life)}</h2>
+                <h2 style="color: var(--primary-color); margin: 4px 0 0 0; font-size: 1.75rem; font-weight: 700;">{fmt_money(recommended_term_life)}</h2>
             </div>
             """, unsafe_allow_html=True)
             
@@ -229,9 +214,9 @@ def render_page(supabase):
             st.markdown("To cover hospital bills for you and your dependents without draining savings.")
             
             st.markdown(f"""
-            <div style="background: linear-gradient(145deg, var(--secondary-background-color), transparent); padding: 25px 20px; border-radius: 16px; text-align: center; border: 1px solid rgba(150, 150, 150, 0.2); margin-top: 15px; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03);">
+            <div style="background: var(--secondary-background-color); padding: 18px 20px; border-radius: 8px; text-align: center; border: 1px solid rgba(150, 150, 150, 0.15); margin: 12px 0;">
                 <p style="color: var(--text-color); opacity: 0.6; margin: 0; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">Recommended Cover</p>
-                <h2 style="color: var(--primary-color); margin: 5px 0 0 0; font-size: 3rem; font-weight: 900;">{fmt_money(recommended_health)}</h2>
+                <h2 style="color: var(--primary-color); margin: 4px 0 0 0; font-size: 1.75rem; font-weight: 700;">{fmt_money(recommended_health)}</h2>
             </div>
             """, unsafe_allow_html=True)
             

@@ -69,25 +69,10 @@ def delete_goal_dialog(goal, supabase):
 def render_page(supabase):
     # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags
     st.markdown("""
-        <style>
-        .guardrail-header-title {
-            margin: 0 !important; 
-            padding: 0 !important; 
-            background: linear-gradient(45deg, #ef4444, #f59e0b) !important; 
-            -webkit-background-clip: text !important; 
-            background-clip: text !important; 
-            -webkit-text-fill-color: transparent !important; 
-            color: transparent !important; 
-            display: inline-block !important; 
-            width: fit-content !important;
-        }
-        </style>
-        
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">🛑</div>
-            <h1 class="guardrail-header-title">AI Financial Guardrail</h1>
+        <div class="page-header">
+            <h2>AI Financial Guardrail</h2>
+            <p>Generating single-use payment tokens only if your long-term goals remain safe.</p>
         </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Generating single-use payment tokens only if your long-term goals remain safe.</p>
     """, unsafe_allow_html=True)
 
     # --- 1. FETCH GOALS ---

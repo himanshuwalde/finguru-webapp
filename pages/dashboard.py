@@ -158,25 +158,10 @@ def render_page(supabase):
     
     with header_col1:
         st.markdown("""
-            <style>
-            .dashboard-header-title {
-                margin: 0; 
-                padding: 0; 
-                background: linear-gradient(45deg, #10b981, #3b82f6) !important; 
-                -webkit-background-clip: text !important; 
-                background-clip: text !important; 
-                -webkit-text-fill-color: transparent !important; 
-                color: transparent !important; 
-                display: inline-block !important; 
-                width: fit-content !important;
-            }
-            </style>
-            
-            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-                <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">📊</div>
-                <h1 class="dashboard-header-title">Financial Dashboard</h1>
+            <div class="page-header">
+                <h2>Financial Dashboard</h2>
+                <p>Track wealth, analyze spending, and manage accounts.</p>
             </div>
-            <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Track wealth, analyze spending, and manage accounts.</p>
         """, unsafe_allow_html=True)
         
     with header_col2:
@@ -624,24 +609,23 @@ def _render_health_hero(supabase):
 
     st.markdown(
         f"""
-        <div style='background:linear-gradient(120deg,#0ea5e9, #7c3aed 55%,#d946ef);
-             border-radius:18px;padding:20px 24px;color:white;margin-bottom:12px'>
-          <div style='display:flex;align-items:center;gap:28px;flex-wrap:wrap'>
+        <div style='background:var(--secondary-background-color);border:1px solid rgba(150,150,150,.12);
+             border-radius:8px;padding:18px 22px;margin-bottom:12px'>
+          <div style='display:flex;align-items:center;gap:24px;flex-wrap:wrap'>
             <div>
-              <div style='font-size:.95rem;opacity:.85;letter-spacing:.3px'>FINANCIAL HEALTH SCORE</div>
-              <div style='font-size:3.2rem;font-weight:800;line-height:1'>
-                {hs['overall']}<span style='font-size:1.2rem;opacity:.75'>/100</span>
+              <div style='font-size:.78rem;opacity:.55;letter-spacing:.8px;text-transform:uppercase;font-weight:600'>Financial Health Score</div>
+              <div style='font-size:2rem;font-weight:700;line-height:1.2;color:var(--text-color)'>
+                {hs['overall']}<span style='font-size:1rem;opacity:.6'>/100</span>
               </div>
-              <div style='font-size:.95rem;opacity:.9'>{hs['verb']}
-                {' · ⚠️ missing data recorded separately' if hs['missing_data'] else ''}</div>
+              <div style='font-size:.88rem;opacity:.75'>{hs['verb']}
+                {' · ⚠️ missing data' if hs['missing_data'] else ''}</div>
             </div>
             <div style='flex:1;min-width:240px'>
-              <div style='font-size:.85rem;opacity:.85;margin-bottom:6px'>
-                Weighted from your real data — savings 25% · spending 20% ·
-                debt 15% · investments 15% · tax 10% · FIRE 15%</div>
-              <div style='background:rgba(255,255,255,.25);border-radius:99px;height:14px;overflow:hidden'>
-                <div style='background:#fff;height:100%;width:{max(0,min(hs["overall"],100))}%;
-                     border-radius:99px;transition:width .6s ease'></div>
+              <div style='font-size:.8rem;opacity:.6;margin-bottom:6px'>
+                Weighted — savings 25% · spending 20% · debt 15% · investments 15% · tax 10% · FIRE 15%</div>
+              <div style='background:rgba(150,150,150,.2);border-radius:99px;height:8px;overflow:hidden'>
+                <div style='background:var(--primary-color);height:100%;width:{max(0,min(hs["overall"],100))}%;
+                     border-radius:99px'></div>
               </div>
             </div>
           </div>

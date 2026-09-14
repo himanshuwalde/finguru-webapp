@@ -60,13 +60,11 @@ def render_page(supabase):
     </style>
     """, unsafe_allow_html=True)
 
-    # ✨ THE FIX: Replaced basic st.title with the premium gradient header block
     st.markdown("""
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">⚙️</div>
-            <h1 style="margin: 0; padding: 0; background: -webkit-linear-gradient(45deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; width: fit-content;">Profile & Settings</h1>
+        <div class="page-header">
+            <h2>Profile & Settings</h2>
+            <p>Manage your identity, customize your AI, and secure your account.</p>
         </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Manage your identity, customize your AI, and secure your account.</p>
     """, unsafe_allow_html=True)
     
     st.write("---")

@@ -27,25 +27,10 @@ def run_monte_carlo(initial_amount, annual_contribution, years, mu, sigma, simul
 def render_page(supabase):
     # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags to prevent Streamlit render glitches
     st.markdown("""
-        <style>
-        .twin-header-title {
-            margin: 0 !important; 
-            padding: 0 !important; 
-            background: linear-gradient(45deg, #8b5cf6, #3b82f6) !important; 
-            -webkit-background-clip: text !important; 
-            background-clip: text !important; 
-            -webkit-text-fill-color: transparent !important; 
-            color: transparent !important; 
-            display: inline-block !important; 
-            width: fit-content !important;
-        }
-        </style>
-        
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">🤖</div>
-            <h1 class="twin-header-title">Financial Twin Simulator</h1>
+        <div class="page-header">
+            <h2>Financial Twin Simulator</h2>
+            <p>Run thousands of probability-based market scenarios and chat with an AI simulation of your future self.</p>
         </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Run thousands of probability-based market scenarios and chat with an AI simulation of your future self.</p>
     """, unsafe_allow_html=True)
 
     # --- 1. FETCH BASELINE DATA (PRIMARY ACCOUNT ONLY) ---

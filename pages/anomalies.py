@@ -10,27 +10,11 @@ from utils.ai_client import get_gemini_client, get_best_model, generate_content_
 genai_client = get_gemini_client()
 
 def render_page(supabase):
-    # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags to prevent Streamlit render glitches
     st.markdown("""
-        <style>
-        .anomaly-header-title {
-            margin: 0 !important; 
-            padding: 0 !important; 
-            background: linear-gradient(45deg, #e74c3c, #9b59b6) !important; 
-            -webkit-background-clip: text !important; 
-            background-clip: text !important; 
-            -webkit-text-fill-color: transparent !important; 
-            color: transparent !important; 
-            display: inline-block !important; 
-            width: fit-content !important;
-        }
-        </style>
-        
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">🔍</div>
-            <h1 class="anomaly-header-title">Anomaly Finder</h1>
+        <div class="page-header">
+            <h2>Anomaly Finder</h2>
+            <p>We monitor your accounts for unusual patterns, late-night swipes, and behavioral anomalies.</p>
         </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">We monitor your accounts for unusual patterns, late-night swipes, and behavioral anomalies.</p>
     """, unsafe_allow_html=True)
 
     # --- 1. FETCH DATA ---

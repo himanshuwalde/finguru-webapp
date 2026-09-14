@@ -19,25 +19,10 @@ def load_ml_model():
 def render_page(supabase):
     # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags to prevent Streamlit render glitches
     st.markdown("""
-        <style>
-        .trust-header-title {
-            margin: 0 !important; 
-            padding: 0 !important; 
-            background: linear-gradient(45deg, #2563EB, #00FFCC) !important; 
-            -webkit-background-clip: text !important; 
-            background-clip: text !important; 
-            -webkit-text-fill-color: transparent !important; 
-            color: transparent !important; 
-            display: inline-block !important; 
-            width: fit-content !important;
-        }
-        </style>
-        
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">🏦</div>
-            <h1 class="trust-header-title">AI Trust Engine</h1>
-        </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Generating a shadow credit score using XGBoost on alternative behavioral data.</p>
+        <div class="page-header">
+        <h2>Trust Engine (Loan Predictor)</h2>
+        <p>Generating a shadow credit score using XGBoost on alternative behavioral data.</p>
+    </div>
     """, unsafe_allow_html=True)
 
     # Load Model
@@ -256,8 +241,8 @@ def render_page(supabase):
             res_c3.metric(label="Debt-to-Income (FOIR)", value=f"{foir*100:.1f}%", delta="High Risk" if foir > 0.55 else None, delta_color=foir_color)
 
             prob_color = '#39FF14' if final_prob >= 70 else '#FFD700' if final_prob >= 40 else '#FF3131'
-            st.markdown(f"<h1 style='text-align: center; font-size: 5rem; color: {prob_color}; font-weight: 900; text-shadow: 0 4px 20px {prob_color}44;'>{int(final_prob)}%</h1>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align: center; font-weight: 700; opacity: 0.8;'>Approval Probability</p>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align: center; font-size: 2rem; color: {prob_color}; font-weight: 700;'>{int(final_prob)}%</div>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; font-weight: 500; opacity: 0.6;'>Approval Probability</p>", unsafe_allow_html=True)
 
             if final_prob >= 70:
                 st.success("✅ **Status: Approved.** Your Score, income, and low debt burden comfortably support this loan.")

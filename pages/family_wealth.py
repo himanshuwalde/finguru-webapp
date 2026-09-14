@@ -104,33 +104,16 @@ def render_page(supabase):
     # --- TOP HEADER & NOTIFICATION BELL ---
     # ==========================================
     
-    st.markdown("""
-        <style>
-        .family-header-title {
-            margin: 0 !important; 
-            padding: 0 !important; 
-            background: linear-gradient(45deg, #8b5cf6, #ec4899) !important; 
-            -webkit-background-clip: text !important; 
-            background-clip: text !important; 
-            -webkit-text-fill-color: transparent !important; 
-            color: transparent !important; 
-            display: inline-block !important; 
-            width: fit-content !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
     header_col, nav_col = st.columns([4, 1.2])
-    
+
     with header_col:
         st.markdown("""
-            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-                <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">👨‍👩‍👧</div>
-                <h1 class="family-header-title">Multi-Generational Wealth</h1>
+            <div class="page-header">
+                <h2>Family Dashboard</h2>
+                <p>Manage intergenerational finances securely. Data is only shared with explicit, two-way consent.</p>
             </div>
-            <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Manage intergenerational finances securely. Data is only shared with explicit, two-way consent.</p>
         """, unsafe_allow_html=True)
-        
+
     with nav_col:
         st.write("") 
         notif_count = len(incoming_pending)
@@ -380,7 +363,7 @@ def render_page(supabase):
                 
                 with rc1:
                     st.markdown("<h4 style='color: var(--text-color); opacity: 0.7;'>Recommended Safe Corpus</h4>", unsafe_allow_html=True)
-                    st.markdown(f"<h1 style='color: var(--primary-color); font-size: 3rem; font-weight: 900; text-shadow: 0 2px 10px rgba(37,99,235,0.2);'>{fmt_money(recommended_corpus)}</h1>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color: var(--primary-color); font-size: 1.75rem; font-weight: 700;'>{fmt_money(recommended_corpus)}</div>", unsafe_allow_html=True)
                     st.info("💡 **Recommendation:** Keep this amount in an ultra-short duration debt fund for instant liquidity.")
                 
                 with rc2:

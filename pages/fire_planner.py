@@ -120,11 +120,11 @@ def render_page(supabase):
     prob = result["probability_pct"]
     colour = "#22C55E" if prob >= 70 else "#F59E0B" if prob >= 40 else "#EF4444"
     st.markdown(
-        f"<div style='background:linear-gradient(90deg,{colour}22,{colour}33);border:1px "
-        f"solid {colour}55;border-radius:14px;padding:18px 22px;margin-bottom:14px'>"
-        f"<span style='font-size:1.05rem'>Probability of FIRE</span> "
-        f"<span style='font-size:2.6rem;font-weight:800;color:{colour}'> {prob:.0f}%</span>"
-        f"<span style='color:#94a3b8'>  ·  {result['n_simulations']:,} Monte Carlo trials (seeded)</span>"
+        f"<div style='background:var(--secondary-background-color);border:1px solid "
+        f"{colour}33;border-radius:8px;padding:16px 20px;margin-bottom:14px'>"
+        f"<span style='font-size:.95rem;color:var(--text-color);opacity:.7'>Probability of FIRE</span> "
+        f"<span style='font-size:2rem;font-weight:700;color:{colour}'> {prob:.0f}%</span>"
+        f"<span style='color:#94a3b8;font-size:.85rem'>  ·  {result['n_simulations']:,} Monte Carlo trials (seeded)</span>"
         f"</div>", unsafe_allow_html=True)
     st.progress(min(prob / 100.0, 1.0))
 

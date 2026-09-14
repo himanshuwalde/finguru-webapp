@@ -94,25 +94,10 @@ def confirm_remove_successor(supabase, succ, my_account_ids):
 def render_page(supabase):
     # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags to prevent Streamlit render glitches
     st.markdown("""
-        <style>
-        .legacy-header-title {
-            margin: 0 !important; 
-            padding: 0 !important; 
-            background: linear-gradient(45deg, #16a34a, #0284c7) !important; 
-            -webkit-background-clip: text !important; 
-            background-clip: text !important; 
-            -webkit-text-fill-color: transparent !important; 
-            color: transparent !important; 
-            display: inline-block !important; 
-            width: fit-content !important;
-        }
-        </style>
-        
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">🌳</div>
-            <h1 class="legacy-header-title">Intergenerational Legacy Agent</h1>
+        <div class="page-header">
+            <h2>Legacy Agent</h2>
+            <p>Prevent 'financial ghosting'. Map your assets to your successors permanently, and securely view assets assigned to you.</p>
         </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Prevent 'financial ghosting'. Map your assets to your successors permanently, and securely view assets assigned to you.</p>
     """, unsafe_allow_html=True)
 
     # --- 0. ENSURE USER EMAIL EXISTS ---

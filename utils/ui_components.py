@@ -11,44 +11,20 @@ def render_gradient_header(icon: str, title: str, subtitle: str,
                            gradient_colors: List[str] = None,
                            header_class: str = "custom-header") -> None:
     """
-    Render a consistent gradient header across all pages.
+    Render a consistent page header.
 
     Args:
-        icon: Emoji or icon string
+        icon: Emoji or icon string (kept for call-site compatibility)
         title: Main header title
         subtitle: Subtitle/description text
-        gradient_colors: List of 2 hex colors for gradient (default: teal to blue)
-        header_class: CSS class name for customization
+        gradient_colors: Deprecated, ignored
+        header_class: Deprecated, ignored
     """
-    if gradient_colors is None:
-        gradient_colors = ["#10b981", "#3b82f6"]
-
-    gradient_css = f"linear-gradient(45deg, {gradient_colors[0]}, {gradient_colors[1]})"
-
     st.markdown(f"""
-        <style>
-        .{header_class}-title {{
-            margin: 0 !important;
-            padding: 0 !important;
-            background: {gradient_css} !important;
-            -webkit-background-clip: text !important;
-            background-clip: text !important;
-            -webkit-text-fill-color: transparent !important;
-            color: transparent !important;
-            display: inline-block !important;
-            width: fit-content !important;
-        }}
-        </style>
-
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color);
-                        padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
-                {icon}
-            </div>
-            <h1 class="{header_class}-title">{title}</h1>
+        <div class="page-header">
+            <h2>{title}</h2>
+            <p>{subtitle}</p>
         </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem;
-                  margin-bottom: 2rem; padding-left: 5px;">{subtitle}</p>
     """, unsafe_allow_html=True)
 
 

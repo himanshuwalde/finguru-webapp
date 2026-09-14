@@ -57,25 +57,10 @@ def categorize_merchant(merchant_name):
 def render_page(supabase):
     # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags to prevent Streamlit render glitches
     st.markdown("""
-        <style>
-        .ghost-header-title {
-            margin: 0; 
-            padding: 0; 
-            background: linear-gradient(45deg, #e74c3c, #f39c12) !important; 
-            -webkit-background-clip: text !important; 
-            background-clip: text !important; 
-            -webkit-text-fill-color: transparent !important; 
-            color: transparent !important; 
-            display: inline-block !important; 
-            width: fit-content !important;
-        }
-        </style>
-        
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">👻</div>
-            <h1 class="ghost-header-title">UPI Ghost Spend Auditor</h1>
+        <div class="page-header">
+            <h2>Ghost Spend Auditor</h2>
+            <p>Uncover the invisible micro-transactions that are silently draining your surplus.</p>
         </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Uncover the invisible micro-transactions that are silently draining your surplus.</p>
     """, unsafe_allow_html=True)
 
     # --- 1. FETCH & PREP DATA (PRIMARY ACCOUNT ONLY) ---
@@ -166,7 +151,7 @@ def render_page(supabase):
     with col_main:
         st.markdown(f"<h3 style='color: var(--text-color); opacity: 0.7;'>Micro-Transactions (<{fmt_money(100)}) Total</h3>", unsafe_allow_html=True)
         st.caption(f"Analyzing primary account: **{account_name}** | Period: **{time_filter}**")
-        st.markdown(f"<h1 style='color: #e74c3c; font-size: 4rem; font-weight: 900; text-shadow: 0 2px 10px rgba(231,76,60,0.2);'>{fmt_money(total_micro_spend)}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<div style='color: #e74c3c; font-size: 2rem; font-weight: 700;'>{fmt_money(total_micro_spend)}</div>", unsafe_allow_html=True)
         st.error(f"⚠️ **Warning:** {micro_spend_percentage:.1f}% of your total spending is disappearing in micro-transactions.")
 
     with col_sub:

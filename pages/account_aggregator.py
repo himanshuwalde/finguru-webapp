@@ -118,25 +118,10 @@ def run_background_sync(supabase, user_id, bank_data=None):
 # ==========================================
 def render_page(supabase):
     st.markdown("""
-        <style>
-        .aa-header-title {
-            margin: 0 !important; 
-            padding: 0 !important; 
-            background: linear-gradient(45deg, #2563EB, #10b981) !important; 
-            -webkit-background-clip: text !important; 
-            background-clip: text !important; 
-            -webkit-text-fill-color: transparent !important; 
-            color: transparent !important; 
-            display: inline-block !important; 
-            width: fit-content !important;
-        }
-        </style>
-        
-        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-            <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">🔗</div>
-            <h1 class="aa-header-title">Account Aggregator Sync</h1>
+        <div class="page-header">
+            <h2>Bank Sync (Live AA)</h2>
+            <p>Securely link your bank accounts using the RBI-regulated Account Aggregator network.</p>
         </div>
-        <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">Securely link your bank accounts using the RBI-regulated Account Aggregator network.</p>
     """, unsafe_allow_html=True)
 
     # Initialize all required states

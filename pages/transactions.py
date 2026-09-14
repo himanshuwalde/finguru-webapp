@@ -90,24 +90,10 @@ def render_page(supabase):
     with header_col1:
         # ✨ THE FIX: Moved gradient styles to a dedicated CSS class with !important tags to prevent Streamlit render glitches
         st.markdown(f"""
-            <style>
-            .transactions-header-title {{
-                margin: 0 !important; 
-                padding: 0 !important; 
-                background: linear-gradient(45deg, #3b82f6, #10b981) !important; 
-                -webkit-background-clip: text !important; 
-                background-clip: text !important; 
-                -webkit-text-fill-color: transparent !important; 
-                color: transparent !important; 
-                display: inline-block !important; 
-                width: fit-content !important;
-            }}
-            </style>
-            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 5px;">
-                <div style="font-size: 2.2rem; background: var(--secondary-background-color); padding: 12px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">📝</div>
-                <h1 class="transactions-header-title">{account_name}</h1>
-            </div>
-            <p style="color: var(--text-color); opacity: 0.7; font-size: 1.1rem; margin-bottom: 2rem; padding-left: 5px;">List of all your transactions for {account_name}.</p>
+            <div class="page-header">
+            <h2>{account_name}</h2>
+            <p>List of all your transactions for {account_name}.</p>
+        </div>
         """, unsafe_allow_html=True)
         
     with header_col2:
