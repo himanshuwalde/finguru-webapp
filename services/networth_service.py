@@ -12,7 +12,8 @@ from typing import Dict, List
 
 from supabase import Client
 
-from engines import networth_engine
+from engines import networth_engine, portfolio_engine
+from services import market_data_service as mkt
 from services.database import get_db_service
 from services.portfolio_service import get_portfolio_service
 
@@ -30,7 +31,11 @@ class NetWorthService:
         return sum(float(a.get("balance") or 0) for a in accounts)
 
     def get_investments_by_type(self, user_id: str) -> Dict[str, float]:
-        summary = self.portfolio.get_summary(user_id)
+        # Live prices overlay stored values at read time so the Investments line
+        # (and monthly snapshots) reflect today's market. Manual prices remain
+        # the fallback when a ticker is blank / offline / unresolved.
+        rows = mkt.overlay_live_prices(self.portfolio.get_investments(user_id))
+        summary = portfolio_engine.portfolio_summary(rows)
         return {a["asset_type"]: a["current"] for a in summary["allocation"]}
 
     def get_liabilities(self, user_id: str) -> List[Dict]:

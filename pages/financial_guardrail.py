@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -8,6 +10,12 @@ from utils.currency import fmt_label, fmt_money
 
 # Initialize AI client
 genai_client = get_gemini_client()
+
+
+def _pairing_code(user_id: str) -> str:
+    """Deterministic 6-digit pairing code from user_id — same code every session."""
+    h = hashlib.sha256(user_id.encode()).hexdigest()
+    return str(int(h[:8], 16) % 1_000_000).zfill(6)
 
 def calculate_probability(target, current, monthly_contrib, months_left):
     """Calculates a rough probability (0-99%) of hitting a goal based on current trajectory."""
@@ -130,7 +138,74 @@ def render_page(supabase):
     # --- 3. THE SMART CHECKOUT GATEKEEPER ---
     with c2:
         st.subheader("🔗 Active Interception Queue")
-        
+
+        # ── 3a. PAIRING CODE ──────────────────────────────────────────────────
+        code = _pairing_code(st.session_state.user_id)
+        with st.container(border=True):
+            pc_head, pc_btn = st.columns([4, 1])
+            with pc_head:
+                st.markdown(
+                    "<div style='font-weight:700;font-size:.95rem;color:var(--text-color)'>"
+                    "Pair Your Browser Extension</div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "Enter this 6-digit code in the FinGuru Chrome Extension "
+                    "settings to link this session. Once paired, intercepted "
+                    "checkouts appear below automatically."
+                )
+            with pc_btn:
+                st.write("")
+                if st.button("🔄 New Code", key="new_pair_code", use_container_width=True):
+                    # Regenerate by hashing with a salt stored in session state
+                    new_salt = secrets.token_hex(4)
+                    st.session_state["_pair_salt"] = new_salt
+                    st.rerun()
+
+            # Display the code large and copy-friendly
+            display_code = code if not st.session_state.get("_pair_salt") \
+                else str(int(hashlib.sha256(
+                    (st.session_state.user_id + st.session_state["_pair_salt"]).encode()
+                ).hexdigest()[:8], 16) % 1_000_000).zfill(6)
+
+            st.markdown(
+                f"""<div style="text-align:center;padding:18px 0 8px;background:
+                    var(--secondary-background-color);border-radius:10px;
+                    border:1px solid rgba(150,150,150,.15);margin:4px 0 10px">
+                    <span style="font-size:2.4rem;font-weight:800;letter-spacing:8px;
+                        color:var(--primary-color);font-family:monospace">{display_code}</span>
+                    <div style="font-size:.75rem;opacity:.55;margin-top:4px">
+                        Expires in 24 hours · one device per code</div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+            # Connection status
+            try:
+                ext_res = (
+                    supabase.table("pending_checkouts")
+                    .select("id", count="exact")
+                    .eq("user_id", st.session_state.user_id)
+                    .execute()
+                )
+                has_data = True  # if the query succeeded, the table exists
+            except Exception:
+                has_data = False
+
+            if has_data:
+                st.success(
+                    "🟢 Extension is connected and monitoring your checkouts.",
+                    icon="✅",
+                )
+            else:
+                st.info(
+                    "⚪ Extension not yet paired. Enter the code above in the "
+                    "FinGuru Chrome Extension to start protecting your goals."
+                )
+
+        st.write("")
+
+        # ── 3b. INTERCEPTION QUEUE ─────────────────────────────────────────────
         col_title, col_sync = st.columns([2, 1])
         if col_sync.button("🔄 Sync with Extension", use_container_width=True):
             st.rerun()

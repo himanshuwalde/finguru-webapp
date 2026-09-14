@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -99,35 +100,10 @@ def on_account_view_change():
     st.session_state.pop("budget_planner_initialized", None)
 
 
-@st.dialog("Delete account")
-def confirm_delete_account(supabase, acc_id, acc_name):
-    """Ask before permanently deleting a bank account."""
-    st.warning(f"Permanently delete the account **{acc_name}**? "
-               "Its balance and linked budgets will be removed from this app.")
-    c1, c2 = st.columns(2)
-    if c1.button("Yes, delete", type="primary", use_container_width=True):
-        try:
-            supabase.table("accounts").delete().eq("id", acc_id).execute()
-            # If they deleted the account they are currently viewing, switch
-            # back to the combined view and reset budget-planning state.
-            if st.session_state.get("dashboard_account_view_selectbox") == acc_name:
-                st.session_state["dashboard_account_view_selectbox"] = "All Accounts Combined"
-                if st.session_state.get('show_budget_planner'):
-                    st.session_state.show_budget_planner = False
-                st.session_state.pop("edited_budget_df", None)
-                st.session_state.pop("budget_planner_initialized", None)
-        except Exception as e:
-            st.error(f"Failed to delete account: {e}")
-            return  # keep the dialog open so the error is visible
-        st.rerun()
-    if c2.button("Cancel", use_container_width=True):
-        st.rerun()
-
-
 def render_page(supabase):
-    
+
     # State initializations
-    if 'show_budget_planner' not in st.session_state: 
+    if 'show_budget_planner' not in st.session_state:
         st.session_state.show_budget_planner = False
     if 'show_cat_budget' not in st.session_state:
         st.session_state.show_cat_budget = False
@@ -138,31 +114,43 @@ def render_page(supabase):
     if 'budget_planner_initialized' not in st.session_state:
         st.session_state.budget_planner_initialized = False
 
-    # --- ✨ NEW ACTION CALLBACKS ---
-    # These functions run BEFORE the screen is drawn, allowing us to update the widget state safely!
-    def make_primary_callback(acc_id, acc_name):
-        try:
-            supabase.table("accounts").update({"is_primary": False}).eq("user_id", st.session_state.user_id).execute()
-            supabase.table("accounts").update({"is_primary": True}).eq("id", acc_id).execute()
-            # Safe to update this now because the selectbox hasn't been drawn yet!
-            st.session_state["dashboard_account_view_selectbox"] = acc_name
-            on_account_view_change()
-        except Exception as e:
-            st.error(f"Failed to update primary account: {e}")
-
     def go_to_scanner():
         st.session_state.force_page = "add_transaction"
 
+    # --- GREETING WITH DATE ---
+    now = datetime.now()
+    hour = now.hour
+    if hour < 12:
+        greeting = "Good Morning"
+    elif hour < 17:
+        greeting = "Good Afternoon"
+    else:
+        greeting = "Good Evening"
+    date_str = now.strftime("%b %d, %Y")
+    # Use the user's full name from profiles if available, otherwise fall back to email
+    try:
+        prof_res = supabase.table("profiles").select("full_name").eq("id", st.session_state.user_id).execute()
+        full_name = prof_res.data[0].get("full_name", "") if prof_res.data else ""
+    except Exception:
+        full_name = ""
+    display_name = full_name if full_name else st.session_state.user_email.split("@")[0].replace(".", " ").title()
+
+    st.markdown(f"""
+        <div style='margin-bottom:16px'>
+          <div style='font-size:1.5rem;font-weight:700;color:var(--text-color);letter-spacing:-0.3px'>
+            {greeting}, {display_name} <span style='opacity:.4;font-weight:400'>·</span> <span style='opacity:.55;font-size:1rem;font-weight:500'>{date_str}</span>
+          </div>
+          <div style='font-size:.88rem;color:var(--text-color);opacity:.5;margin-top:2px'>
+            Track wealth, analyze spending, and manage accounts.
+          </div>
+        </div>
+    """, unsafe_allow_html=True)
+
     # --- THE HEADER WITH BUTTON ---
-    header_col1, header_col2 = st.columns([4, 1.2]) 
-    
+    header_col1, header_col2 = st.columns([4, 1.2])
+
     with header_col1:
-        st.markdown("""
-            <div class="page-header">
-                <h2>Financial Dashboard</h2>
-                <p>Track wealth, analyze spending, and manage accounts.</p>
-            </div>
-        """, unsafe_allow_html=True)
+        pass  # greeting handled above
         
     with header_col2:
         st.write("") 
@@ -172,7 +160,7 @@ def render_page(supabase):
     # ==========================================
     #   🎯 FINANCIAL CO-PILOT HERO (unified health + KPIs)
     # ==========================================
-    _render_health_hero(supabase)
+    # _render_health_hero(supabase)
 
     # --- FETCH ACCOUNTS ---
     try:
@@ -191,6 +179,11 @@ def render_page(supabase):
     except Exception as e:
         st.error(f"Failed to fetch transactions: {e}")
         all_transactions = []
+
+    # Always have a transactions frame in scope for the sections below
+    # (Upcoming Bills + Insights render even when the account is empty).
+    df = pd.DataFrame()
+    today = datetime.now()
 
     if len(user_accounts) > 0:
         st.write("---")
@@ -216,8 +209,7 @@ def render_page(supabase):
             if 'created_at' in df.columns:
                 df['created_at'] = pd.to_datetime(df['created_at'])
 
-            # --- TIME FILTERING ---
-            today = datetime.now()
+            # --- TIME FILTERING (today is defined at module scope in render_page) ---
             this_month_df = df[
                 (df['transaction_time'].dt.month == today.month) & 
                 (df['transaction_time'].dt.year == today.year)
@@ -228,10 +220,42 @@ def render_page(supabase):
             total_expense = this_month_df[this_month_df['type'] == 'Expense']['amount'].sum()
             net_savings = total_income - total_expense
 
+            # --- MONTH-OVER-MONTH COMPARISON ---
+            prev_month_date = today - relativedelta(months=1)
+            prev_month_df = df[
+                (df['transaction_time'].dt.month == prev_month_date.month) &
+                (df['transaction_time'].dt.year == prev_month_date.year)
+            ]
+            prev_income = prev_month_df[prev_month_df['type'] == 'Income']['amount'].sum()
+            prev_expense = prev_month_df[prev_month_df['type'] == 'Expense']['amount'].sum()
+            prev_net = prev_income - prev_expense
+
+            def mom(a, b):
+                """Compute % change from prior month b to current a. None when no baseline."""
+                if b == 0:
+                    return None
+                return ((a - b) / abs(b)) * 100
+
+            def mom_str(cur, prev):
+                """Human string like '↑ 8.4% this month'. Arrow = actual direction;
+                the metric's delta_color conveys good/bad."""
+                pct = mom(cur, prev)
+                if pct is None:
+                    return None
+                arrow = "↑" if pct >= 0 else "↓"
+                return f"{arrow} {abs(pct):.1f}% this month"
+
             m1, m2, m3 = st.columns(3)
-            m1.metric("💰 Monthly Income", fmt_money(total_income, dp=2))
-            m2.metric("💸 Monthly Expenses", fmt_money(total_expense, dp=2))
-            m3.metric("🏦 Monthly Net", fmt_money(net_savings, dp=2))
+            m1.metric("💰 Monthly Income", fmt_money(total_income, dp=2),
+                      delta=mom_str(total_income, prev_income),
+                      delta_color="normal")
+            # Expense: spending up is bad → inverse colors so a rise shows red
+            m2.metric("💸 Monthly Expenses", fmt_money(total_expense, dp=2),
+                      delta=mom_str(total_expense, prev_expense),
+                      delta_color="inverse")
+            m3.metric("🏦 Monthly Net", fmt_money(net_savings, dp=2),
+                      delta=mom_str(net_savings, prev_net),
+                      delta_color="normal")
 
             # ==========================================
             # 🎯 MONTHLY BUDGET PROGRESS BAR & AI PLANNER
@@ -400,8 +424,16 @@ def render_page(supabase):
             # LEFT COLUMN: Recent Transactions Feed
             with c1:
                 with st.container(border=True):
-                    st.subheader("Recent Transactions")
-                    
+                    tx_head1, tx_head2 = st.columns([3, 1.2])
+                    with tx_head1:
+                        st.subheader("Recent Transactions")
+
+                    def go_to_transactions():
+                        st.session_state.sidebar_choice = "💳 Transactions & Budgeting"
+                        st.session_state.force_page = None
+                    with tx_head2:
+                        st.button("View All", use_container_width=True, on_click=go_to_transactions)
+
                     if 'created_at' in df.columns:
                         recent_df = df.sort_values(by=["transaction_time", "created_at"], ascending=[False, False]).head(6)
                     else:
@@ -500,199 +532,327 @@ def render_page(supabase):
             
         else: st.info(f"📊 No transactions found.")
             
-    else: st.info("📊 Add a Bank Account below to see analytics!")
+    else: st.info("📊 Add a Bank Account in Settings to see analytics!")
 
     st.write("---")
 
     # ==========================================
-    #   SECTION 2: BANK ACCOUNTS MANAGER
+    #   SECTION 2: UPCOMING BILLS + FINGURU INSIGHTS (2-col)
     # ==========================================
-    st.subheader("🏦 Your Bank Accounts")
+    col_left, col_right = st.columns(2)
+    with col_left:
+        _render_upcoming_bills(df, today, user_accounts)
+    with col_right:
+        _render_finguru_insights(supabase, df, today)
 
-    if len(user_accounts) > 0:
-        cols = st.columns(min(len(user_accounts), 4))
-        for index, acc in enumerate(user_accounts):
-            with cols[index % 4]:
-                is_primary = acc.get('is_primary', False)
-                title = f"🌟 {acc['account_name']}" if is_primary else acc['account_name']
-                st.metric(label=f"{title} ({acc['account_type']})", value=fmt_money(acc['balance'], dp=2))
-                
-                btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 1.2])
-                
-                if btn_col1.button("✏️", key=f"edit_{acc['id']}", help="Edit Account"):
-                    st.session_state.editing_account = acc
-                    st.rerun()
-                
-                if btn_col2.button("🗑️", key=f"del_init_{acc['id']}", help="Delete Account"):
-                    confirm_delete_account(supabase, acc['id'], acc['account_name'])
+# ==========================================================================
+#  SECTION 2: UPCOMING BILLS + FINGURU INSIGHTS
+# ==========================================================================
 
-                if not is_primary:
-                    # ✨ THE FIX: We use on_click here to trigger the callback safely BEFORE the screen evaluates
-                    btn_col3.button("Make ⭐", key=f"pri_{acc['id']}", help="Set as Primary",
-                                    on_click=make_primary_callback, args=(acc['id'], acc['account_name']))
-    else: st.info("No accounts yet.")
 
-    st.write("---")
+def _render_upcoming_bills(df, today, user_accounts):
+    """Show forecasted recurring bills for the rest of the month (same engine as
+    the Safe-to-Spend page) so the user never misses a silent out-flow.
+    Designed to render inside a column container."""
+    st.subheader("Upcoming Bills")
 
-    account_types = ["Savings", "Current", "Fixed Deposit (FD)", "Credit Card", "Wallet"]
+    bills_df = pd.DataFrame()
+    for acc in user_accounts:
+        acc_df = df[df["account_id"] == acc["id"]] if "account_id" in df.columns else df
+        acc_bills = _predict_upcoming_bills(acc_df, today, acc)
+        if not acc_bills.empty:
+            bills_df = pd.concat([bills_df, acc_bills], ignore_index=True)
 
-    if st.session_state.editing_account:
-        acc_to_edit = st.session_state.editing_account
-        st.subheader(f"✏️ Editing: {acc_to_edit['account_name']}")
-        with st.form("edit_account_form"):
-            updated_name = st.text_input("Account Name", value=acc_to_edit['account_name'])
-            try: type_index = account_types.index(acc_to_edit['account_type'])
-            except ValueError: type_index = 0
-            
-            updated_type = st.selectbox("Account Type", account_types, index=type_index)
-            updated_balance = st.number_input(fmt_label("Balance (₹)"), value=float(acc_to_edit['balance']), step=100.0)
+    if bills_df.empty:
+        st.info("No recurring bills forecasted for the rest of this month. "
+                "Repeating expenses appear here automatically once you log two or more.")
+        return
 
-            current_budget = float(acc_to_edit.get('monthly_budget') or 0.0)
-            updated_budget = st.number_input(fmt_label("Monthly Budget Limit (₹)"), value=current_budget, step=1000.0, help="Set to 0 to disable.")
-            
-            c1, c2 = st.columns(2)
-            with c1: save_edit = st.form_submit_button("Save Changes", type="primary")
-            with c2: cancel_edit = st.form_submit_button("Cancel")
-            
-            if save_edit:
-                if updated_name:
-                    supabase.table("accounts").update({
-                        "account_name": updated_name, "account_type": updated_type,
-                        "balance": updated_balance, "monthly_budget": updated_budget
-                    }).eq("id", acc_to_edit['id']).execute()
-                    st.session_state.editing_account = None
-                    st.rerun()
-                else: st.error("Account name cannot be empty.")
-            
-            if cancel_edit:
-                st.session_state.editing_account = None
-                st.rerun()
-    else:
-        with st.expander("➕ Add New Bank Account", expanded=(len(user_accounts) == 0)):
-            with st.form("add_account_form", clear_on_submit=True):
-                new_acc_name = st.text_input("Account Name (e.g., HDFC Salary, SBI Savings)")
-                new_acc_type = st.selectbox("Account Type", account_types)
-                new_acc_balance = st.number_input(fmt_label("Initial Balance (₹)"), min_value=0.0, step=100.0)
-                new_acc_budget = st.number_input(fmt_label("Monthly Budget Limit (₹)"), min_value=0.0, step=1000.0, help="Optional. Set a maximum spend limit for this account.")
-                
-                if st.form_submit_button("Save Account", type="primary"):
-                    if new_acc_name:
-                        try:
-                            is_first_acc = (len(user_accounts) == 0)
-                            supabase.table("accounts").insert({
-                                "user_id": st.session_state.user_id, "account_name": new_acc_name,
-                                "account_type": new_acc_type, "balance": new_acc_balance,
-                                "monthly_budget": new_acc_budget, "is_primary": is_first_acc
-                            }).execute()
-                            st.success(f"Successfully added {new_acc_name}!")
-                            st.rerun()
-                        except Exception as e: st.error(f"Failed to save account: {e}")
-                    else: st.error("Please provide an account name.")
+    bills_df = bills_df.sort_values("predicted_date")
+    total_liability = bills_df["predicted_amount"].sum()
+
+    with st.container(border=True):
+        html = "<div style='display:flex;flex-direction:column;gap:8px;'>"
+        for _, row in bills_df.iterrows():
+            date_str = row["predicted_date"].strftime("%b %d")
+            desc = str(row["description"]).title()
+            html += (
+                "<div style='display:flex;justify-content:space-between;align-items:center;"
+                "background:rgba(231,76,60,0.08);border-left:4px solid #e74c3c;"
+                "border-radius:6px;padding:10px 14px;'>"
+                f"<div><div style='font-weight:600;font-size:.92rem;color:var(--text-color)'>{desc}</div>"
+                f"<div style='font-size:.8rem;color:var(--text-color);opacity:.6'>Due approx: {date_str} "
+                f"· {row['category']}</div></div>"
+                f"<div style='font-weight:700;color:#e74c3c'>{fmt_money(float(row['predicted_amount']))}</div>"
+                "</div>"
+            )
+        html += "</div>"
+        st.markdown(html, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style='display:flex;justify-content:space-between;align-items:center;
+             border-top:1px solid rgba(150,150,150,.15);padding-top:10px;margin-top:6px'>
+          <span style='font-size:.85rem;color:var(--text-color);opacity:.6'>Total forecasted</span>
+          <span style='font-size:1.15rem;font-weight:700;color:#e74c3c'>{fmt_money(total_liability)}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def _predict_upcoming_bills(df, current_date, acc=None):
+    """Forecast the next occurrence + amount for every expense that repeated at
+    least twice, filtering to bills due inside the rest of this month. Mirrors
+    safe_to_spend.predict_upcoming_bills but scoped per-account label."""
+    try:
+        from sklearn.linear_model import LinearRegression
+    except Exception:
+        return pd.DataFrame()
+
+    if df.empty or "transaction_time" not in df.columns:
+        return pd.DataFrame()
+
+    end_of_month = current_date.replace(
+        day=pd.Timestamp(current_date.year, current_date.month,
+                         1).days_in_month)
+    upcoming = []
+    expense_df = df[df["type"] == "Expense"].copy()
+    if expense_df.empty:
+        return pd.DataFrame()
+
+    for desc, group in expense_df.groupby("description"):
+        if len(group) < 2:
+            continue
+        group = group.sort_values("transaction_time")
+        base = group["transaction_time"].min()
+        days = (group["transaction_time"] - base).dt.days.astype(float).values
+        X = np.arange(len(group)).reshape(-1, 1)
+        try:
+            date_model = LinearRegression().fit(X, days)
+            predicted_offset = date_model.predict([[len(group)]])[0]
+            predicted_date = base + pd.Timedelta(days=float(predicted_offset))
+            amount_model = LinearRegression().fit(
+                X, group["amount"].astype(float).values)
+            predicted_amount = float(amount_model.predict([[len(group)]])[0])
+        except Exception:
+            continue
+        if current_date <= predicted_date <= end_of_month:
+            acc_label = f" · {acc['account_name']}" if acc else ""
+            upcoming.append({
+                "description": f"{desc.title()}{acc_label}",
+                "predicted_date": predicted_date,
+                "predicted_amount": max(predicted_amount, 0.0),
+                "category": group["category"].iloc[0],
+            })
+    return pd.DataFrame(upcoming)
+
+
+def _render_finguru_insights(supabase, df, today):
+    """Data-grounded FinGuru insights: combines the health-engine flags with a
+    few deterministic, per-user observations. No invented numbers.
+    Designed to render inside a column container."""
+    st.subheader("FinGuru Insights")
+
+    # --- Anchor: the health engine's verified flags (same numbers as chat/AI) ---
+    flags = []
+    kpis = {}
+    try:
+        context = recommendation_service.build_financial_context(
+            supabase, st.session_state.user_id)
+        flags = context["health_score"].get("flags", [])
+        kpis = context.get("kpis", {})
+    except Exception:
+        pass
+
+    # Severity → accent colour for left border (no emoji)
+    severity_color = {
+        "positive": "#2ecc71",
+        "warning":  "#f1c40f",
+        "danger":   "#e74c3c",
+    }
+    insights = []
+
+    for flag in flags:
+        insights.append({
+            "color": severity_color.get(flag.get("severity"), "#888"),
+            "text": flag.get("message", ""),
+        })
+
+    # --- Data-derived observations (only when we actually have transactions) ---
+    if not df.empty and "transaction_time" in df.columns:
+        exp = df[df["type"] == "Expense"]
+        if not exp.empty:
+            top_cat = (exp.groupby("category")["amount"].sum()
+                       .sort_values(ascending=False).head(1))
+            if not top_cat.empty:
+                cat, amt = top_cat.index[0], float(top_cat.iloc[0])
+                pct = (amt / exp["amount"].sum() * 100) if exp["amount"].sum() else 0
+                insights.append({
+                    "color": "#3498db",
+                    "text": f"<b>{cat}</b> is your biggest all-time spend at "
+                            f"{fmt_money(amt)} ({pct:.0f}% of all expenses). "
+                            f"Consider whether this category deserves a budget cap.",
+                })
+
+        emonth = exp[exp["transaction_time"].dt.month == today.month]
+        if not emonth.empty:
+            emonth_amt = emonth["amount"].sum()
+            n_exp = len(emonth)
+            avg_txn = emonth_amt / n_exp if n_exp else 0
+            insights.append({
+                "color": "#9b59b6",
+                "text": f"This month you've logged <b>{n_exp}</b> expense(s) averaging "
+                        f"<b>{fmt_money(avg_txn)}</b> each.",
+            })
+
+        if "is_recurring" in exp.columns:
+            recur = exp[exp["is_recurring"].fillna(False).astype(bool)]
+        else:
+            recur = exp.iloc[0:0]
+        if not recur.empty:
+            recurring_total = recur["amount"].sum()
+            insights.append({
+                "color": "#e67e22",
+                "text": f"Recurring charges total <b>~{fmt_money(recurring_total)}</b> — "
+                        f"check that each subscription is still worth it.",
+            })
+
+    # --- Health-score based insight ---
+    if kpis.get("monthly_income"):
+        mi = float(kpis["monthly_income"])
+        me = float(kpis.get("monthly_expense") or 0)
+        sr = ((mi - me) / mi * 100) if mi else 0
+        if sr >= 0:
+            insights.append({
+                "color": "#2ecc71",
+                "text": f"You keep about <b>{sr:.0f}%</b> of your monthly income "
+                        f"after expenses. Aim for 20%+ to stay on track.",
+            })
+        else:
+            insights.append({
+                "color": "#e74c3c",
+                "text": f"You're spending <b>{fmt_money(abs(me - mi))}</b> more than "
+                        f"you earn this month. Trim discretionary categories first.",
+            })
+
+    if not insights:
+        st.info("Add a few transactions to unlock personalized FinGuru insights.")
+        return
+
+    with st.container(border=True):
+        for ins in insights:
+            if not ins["text"]:
+                continue
+            st.markdown(
+                f"<div style='display:flex;gap:10px;align-items:flex-start;"
+                f"padding:10px 12px;margin-bottom:6px;'>"
+                f"<div style='width:4px;border-radius:4px;background:{ins['color']};flex-shrink:0'></div>"
+                f"<div style='font-size:.9rem;color:var(--text-color);line-height:1.55'>"
+                f"{ins['text']}</div></div>",
+                unsafe_allow_html=True)
+
 
 # ==========================================================================
 #  FINANCIAL CO-PILOT HERO — health score + unified KPIs (Phase 7)
 # ==========================================================================
 
 
-def _render_health_hero(supabase):
-    """One source of truth: recommendation_service → same numbers as chat/AI."""
-    try:
-        context = recommendation_service.build_financial_context(
-            supabase, st.session_state.user_id)
-    except Exception as e:
-        st.warning(f"Health summary unavailable: {e}")
-        return
+# def _render_health_hero(supabase):
+#     """One source of truth: recommendation_service → same numbers as chat/AI."""
+#     try:
+#         context = recommendation_service.build_financial_context(
+#             supabase, st.session_state.user_id)
+#     except Exception as e:
+#         st.warning(f"Health summary unavailable: {e}")
+#         return
 
-    hs = context["health_score"]
-    kpis = context["kpis"]
-    fin = context["financial"]
+#     hs = context["health_score"]
+#     kpis = context["kpis"]
+#     fin = context["financial"]
 
-    st.markdown(
-        f"""
-        <div style='background:var(--secondary-background-color);border:1px solid rgba(150,150,150,.12);
-             border-radius:8px;padding:18px 22px;margin-bottom:12px'>
-          <div style='display:flex;align-items:center;gap:24px;flex-wrap:wrap'>
-            <div>
-              <div style='font-size:.78rem;opacity:.55;letter-spacing:.8px;text-transform:uppercase;font-weight:600'>Financial Health Score</div>
-              <div style='font-size:2rem;font-weight:700;line-height:1.2;color:var(--text-color)'>
-                {hs['overall']}<span style='font-size:1rem;opacity:.6'>/100</span>
-              </div>
-              <div style='font-size:.88rem;opacity:.75'>{hs['verb']}
-                {' · ⚠️ missing data' if hs['missing_data'] else ''}</div>
-            </div>
-            <div style='flex:1;min-width:240px'>
-              <div style='font-size:.8rem;opacity:.6;margin-bottom:6px'>
-                Weighted — savings 25% · spending 20% · debt 15% · investments 15% · tax 10% · FIRE 15%</div>
-              <div style='background:rgba(150,150,150,.2);border-radius:99px;height:8px;overflow:hidden'>
-                <div style='background:var(--primary-color);height:100%;width:{max(0,min(hs["overall"],100))}%;
-                     border-radius:99px'></div>
-              </div>
-            </div>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+#     st.markdown(
+#         f"""
+#         <div style='background:var(--secondary-background-color);border:1px solid rgba(150,150,150,.12);
+#              border-radius:8px;padding:18px 22px;margin-bottom:12px'>
+#           <div style='display:flex;align-items:center;gap:24px;flex-wrap:wrap'>
+#             <div>
+#               <div style='font-size:.78rem;opacity:.55;letter-spacing:.8px;text-transform:uppercase;font-weight:600'>Financial Health Score</div>
+#               <div style='font-size:2rem;font-weight:700;line-height:1.2;color:var(--text-color)'>
+#                 {hs['overall']}<span style='font-size:1rem;opacity:.6'>/100</span>
+#               </div>
+#               <div style='font-size:.88rem;opacity:.75'>{hs['verb']}
+#                 {' · ⚠️ missing data' if hs['missing_data'] else ''}</div>
+#             </div>
+#             <div style='flex:1;min-width:240px'>
+#               <div style='font-size:.8rem;opacity:.6;margin-bottom:6px'>
+#                 Weighted — savings 25% · spending 20% · debt 15% · investments 15% · tax 10% · FIRE 15%</div>
+#               <div style='background:rgba(150,150,150,.2);border-radius:99px;height:8px;overflow:hidden'>
+#                 <div style='background:var(--primary-color);height:100%;width:{max(0,min(hs["overall"],100))}%;
+#                      border-radius:99px'></div>
+#               </div>
+#             </div>
+#           </div>
+#         </div>
+#         """, unsafe_allow_html=True)
 
-    c = st.columns(6)
-    c[0].metric("🤖 Health Score", f"{hs['overall']}/100", delta=hs["verb"])
-    c[1].metric("🏦 Net Worth", fmt_money(kpis["net_worth"]))
-    c[2].metric("💸 Monthly Spend", fmt_money(kpis["monthly_expense"]),
-                f"income {fmt_money(kpis['monthly_income'])}")
-    c[3].metric("📈 Investments", fmt_money(kpis["invested_current"]))
-    c[4].metric("🧾 Tax (eff. rate)",
-                f"{kpis['effective_tax_rate']:.1f}%" if kpis["has_tax_data"] else "—",
-                "record in Tax Planner" if not kpis["has_tax_data"] else None)
-    c[5].metric("🔥 P(FIRE)",
-                f"{kpis['fire_probability_pct']:.0f}%" if kpis["has_fire_data"] else "—",
-                "save a FIRE plan" if not kpis["has_fire_data"] else None)
+#     c = st.columns(6)
+#     c[0].metric("🤖 Health Score", f"{hs['overall']}/100", delta=hs["verb"])
+#     c[1].metric("🏦 Net Worth", fmt_money(kpis["net_worth"]))
+#     c[2].metric("💸 Monthly Spend", fmt_money(kpis["monthly_expense"]),
+#                 f"income {fmt_money(kpis['monthly_income'])}")
+#     c[3].metric("📈 Investments", fmt_money(kpis["invested_current"]))
+#     c[4].metric("🧾 Tax (eff. rate)",
+#                 f"{kpis['effective_tax_rate']:.1f}%" if kpis["has_tax_data"] else "—",
+#                 "record in Tax Planner" if not kpis["has_tax_data"] else None)
+#     c[5].metric("🔥 P(FIRE)",
+#                 f"{kpis['fire_probability_pct']:.0f}%" if kpis["has_fire_data"] else "—",
+#                 "save a FIRE plan" if not kpis["has_fire_data"] else None)
 
-    st.write("")
-    left, right = st.columns([1, 1])
-    with left:
-        st.markdown("###### Pillars")
-        for comp in hs["components"]:
-            bar = st.progress(min(comp["score"] / 100, 1.0))
-            st.markdown(
-                f"<div style='font-size:.82rem;color:var(--text-color);opacity:.75;"
-                f"margin:-8px 0 10px'>{comp['label']} · "
-                f"<b>{comp['score']}</b>/100 ({comp['weight']*100:.0f}%)</div>",
-                unsafe_allow_html=True)
-    with right:
-        st.markdown("###### What the numbers say")
-        for flag in hs["flags"]:
-            emoji = {"positive": "✅", "warning": "⚠️", "danger": "🛑"}.get(
-                flag["severity"], "•")
-            st.markdown(f"- {emoji} {flag['message']}")
+#     st.write("")
+#     left, right = st.columns([1, 1])
+#     with left:
+#         st.markdown("###### Pillars")
+#         for comp in hs["components"]:
+#             bar = st.progress(min(comp["score"] / 100, 1.0))
+#             st.markdown(
+#                 f"<div style='font-size:.82rem;color:var(--text-color);opacity:.75;"
+#                 f"margin:-8px 0 10px'>{comp['label']} · "
+#                 f"<b>{comp['score']}</b>/100 ({comp['weight']*100:.0f}%)</div>",
+#                 unsafe_allow_html=True)
+#     with right:
+#         st.markdown("###### What the numbers say")
+#         for flag in hs["flags"]:
+#             emoji = {"positive": "✅", "warning": "⚠️", "danger": "🛑"}.get(
+#                 flag["severity"], "•")
+#             st.markdown(f"- {emoji} {flag['message']}")
 
-        with st.expander("✨ Explain by the AI (grounded in these numbers)"):
-            if st.button("Generate summary", type="primary",
-                         use_container_width=True, key="hero_ai"):
-                summary = recommendation_service.explain_health(context)
-                try:
-                    from utils.ai_client import (get_gemini_client,
-                                                 get_generative_model,
-                                                 generate_content_safe)
-                    genai = get_gemini_client()
-                    model = get_generative_model(genai, prefer_flash=True)
-                    _money_kpis = {"net_worth", "monthly_expense", "monthly_income",
-                                   "invested_current", "potential_tax_saving",
-                                   "total_assets", "total_liabilities"}
-                    payload = json.dumps({
-                        "kpis": {k: (to_display(v) if k in _money_kpis else v)
-                                 for k, v in kpis.items()},
-                        "flags": hs["flags"],
-                        "components": [{k: v for k, v in comp.items()
-                                        if k in ("label", "score", "weight")}
-                                       for comp in hs["components"]],
-                    }, default=str)
-                    ai = generate_content_safe(model, persona_and_currency_note() + (
-                        "\n\nYou are FinGuru's copilot. Summarise this user's Financial "
-                        "Health Score, name the two most actionable improvements, and "
-                        "keep it under 120 words. Ground everything ONLY in this "
-                        "data:\n\n" + payload), max_retries=1)
-                    if ai:
-                        summary = ai
-                except Exception as e:
-                    print(f"[dashboard] AI explain failed ({e}); deterministic used")
-                st.markdown(summary)
+#         with st.expander("✨ Explain by the AI (grounded in these numbers)"):
+#             if st.button("Generate summary", type="primary",
+#                          use_container_width=True, key="hero_ai"):
+#                 summary = recommendation_service.explain_health(context)
+#                 try:
+#                     from utils.ai_client import (get_gemini_client,
+#                                                  get_generative_model,
+#                                                  generate_content_safe)
+#                     genai = get_gemini_client()
+#                     model = get_generative_model(genai, prefer_flash=True)
+#                     _money_kpis = {"net_worth", "monthly_expense", "monthly_income",
+#                                    "invested_current", "potential_tax_saving",
+#                                    "total_assets", "total_liabilities"}
+#                     payload = json.dumps({
+#                         "kpis": {k: (to_display(v) if k in _money_kpis else v)
+#                                  for k, v in kpis.items()},
+#                         "flags": hs["flags"],
+#                         "components": [{k: v for k, v in comp.items()
+#                                         if k in ("label", "score", "weight")}
+#                                        for comp in hs["components"]],
+#                     }, default=str)
+#                     ai = generate_content_safe(model, persona_and_currency_note() + (
+#                         "\n\nYou are FinGuru's copilot. Summarise this user's Financial "
+#                         "Health Score, name the two most actionable improvements, and "
+#                         "keep it under 120 words. Ground everything ONLY in this "
+#                         "data:\n\n" + payload), max_retries=1)
+#                     if ai:
+#                         summary = ai
+#                 except Exception as e:
+#                     print(f"[dashboard] AI explain failed ({e}); deterministic used")
+#                 st.markdown(summary)
 
-    st.write("---")
+#     st.write("---")

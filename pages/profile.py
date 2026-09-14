@@ -30,6 +30,23 @@ def confirm_total_wipe(supabase):
         st.rerun()
 
 
+@st.dialog("Delete account")
+def confirm_delete_account(supabase, acc_id, acc_name):
+    """Ask before permanently deleting a bank account."""
+    st.warning(f"Permanently delete the account **{acc_name}**? "
+               "Its balance and linked budgets will be removed from this app.")
+    c1, c2 = st.columns(2)
+    if c1.button("Yes, delete", type="primary", use_container_width=True, key="del_acc_confirm"):
+        try:
+            supabase.table("accounts").delete().eq("id", acc_id).execute()
+        except Exception as e:
+            st.error(f"Failed to delete account: {e}")
+            return
+        st.rerun()
+    if c2.button("Cancel", use_container_width=True, key="del_acc_cancel"):
+        st.rerun()
+
+
 def render_page(supabase):
     # ✨ THE FIX: Upgraded Tab CSS to explicitly use dynamic theme variables
     st.markdown("""
@@ -77,7 +94,7 @@ def render_page(supabase):
         user_profile = {} 
 
     # --- THE TAB LAYOUT (Billing Removed) ---
-    tab1, tab2, tab3 = st.tabs(["👤 Identity", "🧠 AI Persona", "🔐 Security & DPDP"])
+    tab1, tab2, tab3, tab4 = st.tabs(["👤 Identity", "🧠 AI Persona", "🔐 Security & DPDP", "🏦 Bank Accounts"])
 
     # ==========================================
     # TAB 1: IDENTITY & BASIC INFO
@@ -258,3 +275,93 @@ def render_page(supabase):
                 st.caption("Permanently wipe all records, transactions, and profiles.")
                 if st.button("🗑️ Request Account Deletion", use_container_width=True):
                     confirm_total_wipe(supabase)
+
+    # ==========================================
+    # TAB 4: BANK ACCOUNTS MANAGER
+    # ==========================================
+    with tab4:
+        st.subheader("Your Bank Accounts")
+
+        def _set_primary(acc_id, acc_name):
+            try:
+                supabase.table("accounts").update({"is_primary": False}).eq("user_id", st.session_state.user_id).execute()
+                supabase.table("accounts").update({"is_primary": True}).eq("id", acc_id).execute()
+            except Exception as e:
+                st.error(f"Failed to update primary account: {e}")
+
+        try:
+            acc_res = supabase.table("accounts").select("*").eq("user_id", st.session_state.user_id).order("created_at").execute()
+            user_accounts = acc_res.data
+        except Exception:
+            user_accounts = []
+
+        account_types = ["Savings", "Current", "Fixed Deposit (FD)", "Credit Card", "Wallet"]
+
+        if user_accounts:
+            cols = st.columns(min(len(user_accounts), 4))
+            for index, acc in enumerate(user_accounts):
+                with cols[index % 4]:
+                    is_primary = acc.get("is_primary", False)
+                    title = f"🌟 {acc['account_name']}" if is_primary else acc["account_name"]
+                    st.metric(label=f"{title} ({acc['account_type']})", value=f"₹{float(acc['balance']):,.2f}")
+
+                    btn1, btn2, btn3 = st.columns([1, 1, 1.2])
+                    with btn1:
+                        if st.button("✏️", key=f"prof_edit_{acc['id']}", help="Edit Account"):
+                            st.session_state.editing_account = acc
+                            st.rerun()
+                    with btn2:
+                        if st.button("🗑️", key=f"prof_del_{acc['id']}", help="Delete Account"):
+                            confirm_delete_account(supabase, acc["id"], acc["account_name"])
+                    with btn3:
+                        if not is_primary:
+                            st.button("Make ⭐", key=f"prof_pri_{acc['id']}",
+                                      help="Set as Primary", on_click=_set_primary,
+                                      args=(acc["id"], acc["account_name"]))
+        else:
+            st.info("No bank accounts yet. Add one below.")
+
+        # --- Edit / Add forms ---
+        if st.session_state.editing_account:
+            acc = st.session_state.editing_account
+            st.markdown(f"**Editing: {acc['account_name']}**")
+            with st.form("settings_edit_account_form"):
+                u_name = st.text_input("Account Name", value=acc["account_name"])
+                t_idx = account_types.index(acc["account_type"]) if acc["account_type"] in account_types else 0
+                u_type = st.selectbox("Account Type", account_types, index=t_idx)
+                u_bal = st.number_input("Balance", value=float(acc["balance"]), step=100.0)
+                u_budget = st.number_input("Monthly Budget Limit", value=float(acc.get("monthly_budget") or 0.0), step=1000.0)
+                c1, c2 = st.columns(2)
+                if c1.form_submit_button("Save Changes", type="primary"):
+                    supabase.table("accounts").update({
+                        "account_name": u_name, "account_type": u_type,
+                        "balance": u_bal, "monthly_budget": u_budget,
+                    }).eq("id", acc["id"]).execute()
+                    st.session_state.editing_account = None
+                    st.success("Account updated.")
+                    st.rerun()
+                if c2.form_submit_button("Cancel"):
+                    st.session_state.editing_account = None
+                    st.rerun()
+        else:
+            with st.expander("➕ Add New Bank Account"):
+                with st.form("settings_add_account_form", clear_on_submit=True):
+                    new_name = st.text_input("Account Name (e.g., HDFC Salary, SBI Savings)")
+                    new_type = st.selectbox("Account Type", account_types)
+                    new_bal = st.number_input("Initial Balance", min_value=0.0, step=100.0)
+                    new_budget = st.number_input("Monthly Budget Limit", min_value=0.0, step=1000.0,
+                                                 help="Set to 0 to disable.")
+                    if st.form_submit_button("Save Account", type="primary"):
+                        if new_name:
+                            supabase.table("accounts").insert({
+                                "user_id": st.session_state.user_id,
+                                "account_name": new_name,
+                                "account_type": new_type,
+                                "balance": new_bal,
+                                "monthly_budget": new_budget,
+                                "is_primary": len(user_accounts) == 0,
+                            }).execute()
+                            st.success(f"Added {new_name}!")
+                            st.rerun()
+                        else:
+                            st.error("Please provide an account name.")

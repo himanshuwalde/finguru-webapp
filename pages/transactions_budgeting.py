@@ -1,13 +1,10 @@
 """Transactions & Budgeting — tabbed wrapper.
 
-Groups: Transactions, Anomaly Finder, Ghost Spend Auditor,
-        Safe-to-Spend Engine, Bank Sync (Live AA).
+Groups: Transactions, Anomaly Finder, Bank Sync (Live AA).
 """
 import streamlit as st
 import pages.transactions as transactions
 import pages.anomalies as anomalies
-import pages.ghost_auditor as ghost_auditor
-import pages.safe_to_spend as safe_to_spend
 import pages.account_aggregator as account_aggregator
 
 
@@ -22,8 +19,6 @@ def render_page(supabase):
     tabs = st.tabs([
         "📝 Transactions",
         "🔍 Anomaly Finder",
-        "👻 Ghost Spend Auditor",
-        "🚦 Safe to Spend",
         "🔗 Bank Sync",
     ])
 
@@ -34,10 +29,4 @@ def render_page(supabase):
         anomalies.render_page(supabase)
 
     with tabs[2]:
-        ghost_auditor.render_page(supabase)
-
-    with tabs[3]:
-        safe_to_spend.render_page(supabase)
-
-    with tabs[4]:
         account_aggregator.render_page(supabase)

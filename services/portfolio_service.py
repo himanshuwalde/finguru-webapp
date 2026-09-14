@@ -55,7 +55,7 @@ class PortfolioService:
             for key in ("quantity", "buy_price", "current_price", "units",
                         "purchase_nav", "current_nav", "principal",
                         "interest_rate", "start_date", "maturity_date",
-                        "purchased_on"):
+                        "purchased_on", "ticker"):
                 val = data.get(key)
                 if val is not None:
                     payload[key] = val.isoformat() if hasattr(val, "isoformat") else val
@@ -76,7 +76,7 @@ class PortfolioService:
             for key in ("asset_type", "name", "quantity", "buy_price",
                         "current_price", "units", "purchase_nav", "current_nav",
                         "principal", "interest_rate", "start_date",
-                        "maturity_date", "purchased_on", "notes"):
+                        "maturity_date", "purchased_on", "notes", "ticker"):
                 val = data.get(key)
                 if val is not None:
                     updates[key] = val.isoformat() if hasattr(val, "isoformat") else val

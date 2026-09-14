@@ -13,6 +13,7 @@ import plotly.express as px
 import streamlit as st
 
 from engines import portfolio_engine
+from services import market_data_service as mkt
 from services.portfolio_service import get_portfolio_service
 from utils.currency import fmt_label, fmt_money
 from utils.ui_components import render_gradient_header, render_alert_banner
@@ -78,6 +79,18 @@ def render_page(supabase):
             c1, c2 = st.columns(2)
             common["invested_amount"] = c1.number_input(fmt_label("Invested amount (₹)"), 0.0, 1e9, 0.0, key="pf_inv")
             common["current_value"] = c2.number_input(fmt_label("Current value (₹)"), 0.0, 1e9, 0.0, key="pf_cv")
+        if asset_type in ("Stock", "Mutual Fund"):
+            common["ticker"] = st.text_input(
+                "Ticker / MF code (optional)",
+                placeholder="e.g. RELIANCE.NS   (Yahoo symbol; .NS / .BO for NSE/BSE)",
+                help="Yahoo Finance symbol for live pricing, e.g. RELIANCE.NS or "
+                     "HDFCBANK.BO. Leave blank to use the price you enter above. "
+                     "Stocks & listed direct-equity MFs auto-update daily; schemes "
+                     "Yahoo doesn't list fall back to your manual price.",
+                key="pf_ticker",
+            )
+        else:
+            common["ticker"] = None
         common["purchased_on"] = st.date_input("Purchase date",
                                                value=date.today(), key="pf_date")
         common["notes"] = st.text_input("Notes (optional)", key="pf_notes")
@@ -99,7 +112,19 @@ def render_page(supabase):
                                "Table `investments` must exist.")
 
     # ------------------------------------------------------------- analytics
-    summary = svc.get_summary(user_id)
+    # Live prices overlay the stored manual values at READ time only — the DB
+    # price stays the fallback. All metrics below therefore react to the real
+    # market while a missing/offline ticker silently keeps the manual value.
+    raw_investments = svc.get_investments(user_id)
+    overlaid = mkt.overlay_live_prices(raw_investments)
+    summary = portfolio_engine.portfolio_summary(overlaid)
+    live_flags = []
+    for h, raw in zip(summary["holdings"], raw_investments):
+        ticker = (raw.get("ticker") or "").strip()
+        live_flags.append(bool(ticker) and mkt.live_price(ticker) is not None)
+    n_live = sum(live_flags)
+    if n_live:
+        st.toast(f"🟢 Live prices for {n_live} holding(s) · as of {summary['as_of']}")
 
     if not summary["holdings"]:
         render_alert_banner("No investments yet. Add your first stock, MF or FD "
@@ -113,6 +138,20 @@ def render_page(supabase):
               f"{summary['return_pct']:+.1f}%")
     c4.metric("Portfolio XIRR", f"{summary['xirr_pct']:.1f}%")
     c5.metric("As of", summary["as_of"])
+
+    refresh_col, live_note = st.columns([1, 5])
+    with refresh_col:
+        if st.button("🔄 Refresh prices", use_container_width=True):
+            mkt.clear_cache()
+            st.rerun()
+    with live_note:
+        if n_live:
+            st.caption(f"🟢 Live prices for {n_live} of "
+                       f"{len(summary['holdings'])} holdings · "
+                       f"as of {summary['as_of']} — refreshes on every visit.")
+        else:
+            st.caption("Showing your manual prices. Add a Yahoo ticker "
+                       "(e.g. RELIANCE.NS) on a stock or MF for live prices.")
 
     st.write("---")
     left, right = st.columns([1, 1])
@@ -134,13 +173,14 @@ def render_page(supabase):
         rows = [{"Name": h["name"], "Type": h["asset_type"],
                  "Invested": fmt_money(h["invested_amount"]),
                  "Current": fmt_money(h["current_value"]),
+                 "Price": "🟢 Live" if live_flags[i] else "⚪ Manual",
                  "Return": f"{h['return_pct']:+.1f}%",
-                 "Date": h["date"] or "—"} for h in summary["holdings"]]
+                 "Date": h["date"] or "—"} for i, h in enumerate(summary["holdings"])]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     # -------------------------------------------------------------- health
     st.write("---")
-    score, insights = svc.get_health(user_id, risk)
+    score, insights = portfolio_engine.portfolio_health(overlaid, risk)
     st.markdown("##### Portfolio Health Score")
     st.progress(min(score / 100, 1.0))
     st.markdown(f"**{score} / 100**" + (" — ✅ healthy" if score >= 70
@@ -151,15 +191,12 @@ def render_page(supabase):
     # --------------------------------------------------------------- delete
     st.write("---")
     st.markdown("##### Manage holdings")
-    for h in summary["holdings"]:
+    for idx, h in enumerate(summary["holdings"]):
         row = st.columns([4, 4, 2])
         row[0].markdown(f"**{h['name']}**   ·   {h['asset_type']}")
         row[1].markdown(f"{fmt_money(h['invested_amount'])} → {fmt_money(h['current_value'])}")
-        inv_id = None
-        # find the real row id for a robust delete (match by name+amount)
-        for raw in svc.get_investments(user_id):
-            if raw["name"] == h["name"] and float(raw["current_value"]) == h["current_value"]:
-                inv_id = raw["id"]
-                break
+        # id comes from the same fetch order as the holdings list, so the live
+        # price overlay never breaks the lookup (no name+amount guessing).
+        inv_id = raw_investments[idx].get("id") if idx < len(raw_investments) else None
         if inv_id and row[2].button("Delete", key=f"del_{inv_id}"):
             confirm_delete_stock(svc, h["name"], inv_id)
