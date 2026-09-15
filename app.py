@@ -163,10 +163,11 @@ _AUTOFILL_KEYS = {
 # ==========================================
 # ✨ SESSION PERSISTENCE ACROSS REFRESH
 # Streamlit's session_state is rebuilt on every page refresh, so a refresh drops
-# the login and strands the user on the landing page. To keep a logged-in user on
-# the SAME module through a refresh (no re-authentication), the app persists a
-# small copy of the Supabase session in the browser via the session_keep/
-# component and re-arms it at the top of each run:
+# the login and strands the user on the landing page. To keep a logged-in user
+# logged in through a refresh (no re-authentication), the app persists a small
+# copy of the Supabase auth session in the browser via the session_keep/
+# component and re-arms it at the top of each run. The user's NAV choice is NOT
+# persisted — every fresh load starts on the landing page (Dashboard):
 #
 #   * cookie (fast path)   — session_keep writes `finguru_session` to a
 #     same-origin cookie (path=/); the browser sends it with the refresh request
@@ -616,7 +617,11 @@ def _read_session_cookie():
 
 def _persist_json():
     """Serialize the live login + current nav choice into the JSON blob the
-    browser keeps (cookie + localStorage mirror). None when not logged in."""
+    browser keeps (cookie + localStorage mirror). None when not logged in.
+    The "page" field survives so a same-tab REFRESH resumes the module the user
+    was on; a genuinely fresh visit (reopened app) is corrected to the landing
+    page separately using the browser's reported navigation type. See the
+    fresh-visit correction in the restore block below."""
     state = st.session_state
     if not state.get("logged_in") or not state.get("_auth_access"):
         return None
@@ -632,7 +637,9 @@ def _persist_json():
 def _restore_session_from(blob):
     """Re-arm the Supabase client and rebuild login state from a persisted
     {access_token, refresh_token, email, id, page} blob so a page refresh stays
-    logged in on the same module without re-authentication.
+    logged in and resumes the module the user was on. The page restore is
+    PROVISIONAL — a genuinely fresh visit (app reopened after closing) is
+    corrected to the landing page later in the restore block.
     Returns True when the session was restored."""
     if not blob or not blob.get("access_token"):
         return False
@@ -802,14 +809,14 @@ if (not (_recovery_folded or _recovery_consumed)
         _persist_clear_requested = True
         st.error("Your session expired. Please log in again.")
 
-# Browser bridge: writes the cookie + localStorage mirror when a store is passed
-# (logged in), erases both after Log Out, and otherwise reports what the browser
-# still holds (the localStorage fallback for when the cookie header is absent).
+# Browser bridge — READ what the browser still holds: the persisted login blob
+# plus (from the component's JS) HOW this document was loaded. The write-back
+# happens at the END of the script, after routing, so the page actually stored
+# is the one the user is looking at — a fresh visit redirected to the landing
+# page writes the landing page in the same run, so a stale "last module" never
+# survives a full app reopen.
 try:
-    if st.session_state.logged_in and not _persist_clear_requested:
-        _keeper = _session_keep(store=_persist_json() or "") or {}
-    else:
-        _keeper = _session_keep(clear=_persist_clear_requested) or {}
+    _keeper = _session_keep() or {}
 except Exception:
     _keeper = {}
 
@@ -818,8 +825,20 @@ if (not st.session_state.logged_in
         and not (_recovery_folded or _recovery_consumed)
         and _keeper.get("session")):
     # Cookie was unavailable but the localStorage mirror survived — restore from
-    # it; the next run re-persists so the cookie is (re)created too.
+    # it; the end-of-script write re-creates the cookie too.
     _restore_session_from(_keeper["session"])
+
+# ── Fresh visit vs refresh ─────────────────────────────────────────────────
+# The browser reports how this document was loaded: "reload" (F5 / Ctrl+R) vs
+# "navigate" (typed URL / app reopened after closing). The cookie fast-path
+# restored the last page on run 1 either way so a refresh resumes instantly
+# with no flash — but a genuinely fresh visit must land on the landing page,
+# not the module the user left open last time. This correction runs before the
+# sidebar radio renders, so the landing page is what actually shows.
+_nav_kind = (_keeper or {}).get("navType")
+if (_nav_kind and _nav_kind not in ("reload", "back_forward")
+        and st.session_state.logged_in):
+    st.session_state.sidebar_choice = _DEFAULT_PAGE
 
 def go_to_auth():
     st.session_state.show_auth_page = True
@@ -920,7 +939,7 @@ if st.session_state.logged_in:
         "💳 Transactions & Budgeting",
         "📈 Wealth",
         "🧾 Tax Planner",
-        "🎯 Goals & Predictions",
+        "🎯 Goals & Protection",
         "👨‍👩‍👧 Family & Legacy",
         "🤖 AI CA Advisor",
     ]
@@ -1285,3 +1304,21 @@ else:
         st.button("Create Free Account", type="primary", use_container_width=True, on_click=go_to_auth, key="footer_btn")
     st.markdown("<p style='text-align: center; color: var(--text-color); opacity: 0.5; font-size: 0.78rem; margin-top: 2.5rem;'>© 2026 FinGuru. All rights reserved.</p>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: var(--text-color); opacity: 0.35; font-size: 0.68rem;'>FinGuru is an educational financial planning tool. Always consult a certified financial advisor before making investment or tax decisions.</p>", unsafe_allow_html=True)
+
+
+# ==========================================
+# ✨ PERSIST SESSION — WRITE-BACK (runs after routing)
+# Stores the page the user is actually on. On a fresh visit the correction above
+# already forced the landing page, so this re-persists the landing page over the
+# stale "last module" in the same run — a full reopen starts clean next time.
+# A same-tab refresh keeps its module because "reload" never triggered the
+# correction. The component is change-gated: an identical store writes nothing.
+# ==========================================
+if not (_recovery_folded or _recovery_consumed):
+    try:
+        if st.session_state.logged_in and not _persist_clear_requested:
+            _session_keep(store=_persist_json() or "")
+        elif _persist_clear_requested:
+            _session_keep(clear=True)
+    except Exception:
+        pass

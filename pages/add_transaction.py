@@ -5,7 +5,7 @@ import json
 import re
 import pandas as pd
 from utils.security import encrypt_data
-from utils.currency import fmt_label, fmt_money, to_inr
+from utils.currency import fmt_input_label, fmt_label, fmt_money, to_inr
 from utils.anomaly_engine import check_and_alert_anomaly
 from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
 

@@ -89,10 +89,30 @@
     writeCookie(store);
   }
 
-  // Report the currently-persisted session to Python, but ONLY when it changed
-  // (change-gated posting is what keeps the feedback loop away).
+  // How THIS document was loaded: "reload" = F5 / Ctrl+R (a same-tab refresh;
+  // the user wants to stay on the same page), "navigate" = a typed URL or an
+  // app reopened after closing the browser (the user wants the landing page),
+  // "back_forward" = history traversal (treated like a refresh). This is the
+  // standard Web Performance API distinction and it is reliable.
+  function navType() {
+    try {
+      var entries = window.performance.getEntriesByType("navigation");
+      if (entries && entries.length && entries[0] && entries[0].type) return entries[0].type;
+    } catch (e) {}
+    try {
+      var t = window.performance.navigation && window.performance.navigation.type;
+      if (t === 1) return "reload";       // RELOAD
+      if (t === 2) return "back_forward"; // HISTORY
+      if (t === 0) return "navigate";     // NAVIGATE
+    } catch (e) {}
+    return null;
+  }
+
+  // Report the currently-persisted session + how this document loaded to
+  // Python, but ONLY when the value changed (change-gated posting is what
+  // keeps the feedback loop away).
   function emit() {
-    var value = { session: null, error: null };
+    var value = { session: null, error: null, navType: navType() };
     var raw = readLocal();
     if (raw) {
       try { value.session = JSON.parse(raw); } catch (e) { value.error = "bad-store"; }
