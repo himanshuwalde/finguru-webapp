@@ -302,3 +302,176 @@ def portfolio_health(investments: List[Dict],
     if not insights:
         insights.append("Portfolio looks well balanced for your risk profile.")
     return score, insights
+
+
+# ------------------------------------------------------------ rebalancing
+
+
+def rebalancing_plan(investments: List[Dict],
+                     risk_tolerance: str = "Moderate",
+                     as_of: date | None = None) -> Dict:
+    """
+    Deterministic rebalancing suggestions: close the gap between the current
+    allocation and the risk-tolerance target, tilted toward better performers.
+
+    The equity/stable split is anchored on RISK_TARGET (same as the health
+    score, so the two features never contradict each other); within a bucket,
+    each holding's ideal share is proportional to (1 + return_pct/100), so
+    winners absorb the additions and laggards take the reductions.
+
+    Returns a plan dict:
+      plan_status       : "rebalance" | "balanced" | "diversify" | "skip"
+      headline          : one-line status for the UI
+      current_equity_pct / target_equity_pct : floats
+      equity_delta      : ₹ to move INTO equity (negative = reduce equity)
+      trades            : [{"from": {name, asset_type}, "to": {name, asset_type},
+                            "amount": float, "reason": str}] — funded moves
+      adds              : [{"name", "asset_type", "amount", "reason"}] — new money
+      warnings          : [str]
+      as_of             : ISO date
+    """
+    holdings = resolve_holdings(investments, as_of)
+    total = sum(h["current_value"] for h in holdings)
+    as_of_str = (as_of or date.today()).isoformat()
+
+    if len(holdings) < 2 or total <= 0:
+        return {
+            "plan_status": "skip",
+            "headline": "Add at least two holdings to see rebalancing suggestions.",
+            "current_equity_pct": 0.0,
+            "target_equity_pct": RISK_TARGET.get(risk_tolerance, 50.0),
+            "equity_delta": 0.0,
+            "trades": [], "adds": [], "warnings": [],
+            "as_of": as_of_str,
+        }
+
+    # Per-holding return (same formula portfolio_summary uses per holding).
+    for h in holdings:
+        invested = h["invested_amount"]
+        h["return_pct"] = (((h["current_value"] - invested) / invested) * 100
+                           if invested else 0.0)
+
+    equity = [h for h in holdings if h["asset_type"] in EQUITY_TYPES]
+    stable = [h for h in holdings if h["asset_type"] not in EQUITY_TYPES]
+    equity_current = sum(h["current_value"] for h in equity)
+
+    target_equity_pct = RISK_TARGET.get(risk_tolerance, 50.0)
+    current_equity_pct = equity_current / total * 100.0
+    target_equity_value = target_equity_pct / 100.0 * total
+    target_stable_value = total - target_equity_value
+    equity_delta = target_equity_value - equity_current
+
+    warnings: List[str] = []
+
+    # The bucket the target calls for isn't held at all → diversification ask.
+    def _diversify_plan(headline: str) -> Dict:
+        return {
+            "plan_status": "diversify",
+            "headline": headline,
+            "current_equity_pct": current_equity_pct,
+            "target_equity_pct": target_equity_pct,
+            "equity_delta": equity_delta,
+            "trades": [], "adds": [], "warnings": [headline],
+            "as_of": as_of_str,
+        }
+
+    if equity_delta > 0 and not equity:
+        return _diversify_plan(
+            f"Everything you hold is a stable asset, but your {risk_tolerance} "
+            f"target wants ~{target_equity_pct:.0f}% in growth. Add a stock or "
+            f"mutual-fund position to move toward it.")
+    if equity_delta < 0 and not stable:
+        return _diversify_plan(
+            f"Everything you hold is equity, but your {risk_tolerance} target "
+            f"wants {target_equity_pct:.0f}% in growth. Add an FD, Gold or "
+            f"Property position to lower risk.")
+
+    # Winner-tilted ideal value for each holding within its own bucket.
+    def _apply_ideal(bucket: List[Dict], size: float) -> None:
+        weights = [max(0.05, 1.0 + h["return_pct"] / 100.0) for h in bucket]
+        total_w = sum(weights)
+        for h, w in zip(bucket, weights):
+            h["_ideal"] = w / total_w * size
+
+    _apply_ideal(equity, target_equity_value)
+    _apply_ideal(stable, target_stable_value)
+
+    thr = max(1000.0, 0.01 * total)           # ignore sub-₹1k / <1% moves
+    trims: List[Tuple[Dict, float]] = []      # (holding, ₹ to free)
+    adds: List[Tuple[Dict, float]] = []       # (holding, ₹ to invest)
+    for h in holdings:
+        gap = h["_ideal"] - h["current_value"]
+        if gap >= thr:
+            adds.append((h, gap))
+        elif gap <= -thr:
+            trims.append((h, -gap))
+
+    trims.sort(key=lambda t: (t[0]["return_pct"], t[0]["name"]))     # weak first
+    adds.sort(key=lambda t: (-t[0]["return_pct"], t[0]["name"]))     # strong first
+
+    # Pair reductions with additions into funded trades.
+    trades: List[Dict] = []
+    ti = ai = 0
+    while ti < len(trims) and ai < len(adds):
+        t_h, t_amt = trims[ti]
+        a_h, a_amt = adds[ai]
+        move = int(round(min(t_amt, a_amt)))
+        if move >= 1000:
+            trades.append({
+                "from": {"name": t_h["name"], "asset_type": t_h["asset_type"]},
+                "to": {"name": a_h["name"], "asset_type": a_h["asset_type"]},
+                "amount": move,
+                "reason": (f"Trim {t_h['name']} ({t_h['return_pct']:+.1f}%) — "
+                           f"the weaker performer — to fund {a_h['name']} "
+                           f"({a_h['return_pct']:+.1f}%), the stronger one."),
+            })
+        trims[ti] = (t_h, t_amt - move)
+        adds[ai] = (a_h, a_amt - move)
+        if t_amt - move < 1000:
+            ti += 1
+        if a_amt - move < 1000:
+            ai += 1
+
+    # Additions left unpaired need new money.
+    adds_out: List[Dict] = []
+    for h, amt in adds[ai:]:
+        if amt >= 1000:
+            adds_out.append({
+                "name": h["name"],
+                "asset_type": h["asset_type"],
+                "amount": int(round(amt)),
+                "reason": (f"{h['name']} sits below its target weight — top it "
+                           f"up with fresh capital."),
+            })
+
+    # Reductions left unpaired → freed cash with no obvious home.
+    leftover_freed = int(round(sum(amt for _, amt in trims[ti:])))
+    if leftover_freed >= 1000:
+        warnings.append(
+            f"Trimming the weaker holdings frees about ₹{leftover_freed:,} with "
+            f"no under-allocated holding to absorb it — reinvest it into a new "
+            f"position or hold it for a market dip.")
+
+    if trades or adds_out or warnings:
+        n_moves = len(trades) + len(adds_out)
+        headline = (
+            f"{n_moves} rebalancing move{'s' if n_moves != 1 else ''} suggested: "
+            f"{target_equity_pct:.0f}% growth is your {risk_tolerance} target — "
+            f"redeploying toward stronger performers.")
+        plan_status = "rebalance"
+    else:
+        plan_status = "balanced"
+        headline = (f"Your portfolio already matches your {risk_tolerance} "
+                    f"allocation — no rebalancing needed.")
+
+    return {
+        "plan_status": plan_status,
+        "headline": headline,
+        "current_equity_pct": current_equity_pct,
+        "target_equity_pct": target_equity_pct,
+        "equity_delta": equity_delta,
+        "trades": trades,
+        "adds": adds_out,
+        "warnings": warnings,
+        "as_of": as_of_str,
+    }

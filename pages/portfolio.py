@@ -188,6 +188,71 @@ def render_page(supabase):
     for msg in insights:
         st.markdown(f"- {msg}")
 
+    # -------------------------------------------------- rebalancing
+    st.write("---")
+    st.markdown("##### ⚖️ Rebalancing Suggestions")
+    plan = portfolio_engine.rebalancing_plan(overlaid, risk)
+
+    if plan["plan_status"] in ("skip", "diversify"):
+        st.info(plan["headline"])
+    elif plan["plan_status"] == "balanced":
+        st.success(plan["headline"])
+    else:
+        # --- equity gap headline row ---
+        _cur_eq = plan["current_equity_pct"]
+        _tgt_eq = plan["target_equity_pct"]
+        _gap = plan["equity_delta"]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Equity now", f"{_cur_eq:.1f}%")
+        c2.metric("Equity target", f"{_tgt_eq:.0f}%")
+        c3.metric(
+            "Rebalance amount",
+            fmt_money(abs(_gap)),
+            delta=("↑ more equity needed" if _gap > 0
+                   else "↓ equity to reduce" if _gap < 0 else "✓ balanced"),
+            delta_color="normal" if _gap >= 0 else "inverse",
+        )
+
+        # --- funded trades ---
+        for t in plan["trades"]:
+            _fn = t["from"]
+            _tn = t["to"]
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:12px;"
+                f"padding:10px 14px;border:1px solid var(--secondary-background-color);"
+                f"border-radius:8px;margin-bottom:6px'>"
+                f"<span style='color:#ef4444;font-weight:700;white-space:nowrap'>"
+                f"🔴 Trim</span>"
+                f"<span style='flex:1'><b>{_fn['name']}</b> <span style='color:#888'>"
+                f"({_fn['asset_type']})</span></span>"
+                f"<span style='font-size:1.1rem;white-space:nowrap'>"
+                f"{fmt_money(t['amount'])}</span>"
+                f"<span style='font-size:1.1rem'>➜</span>"
+                f"<span style='color:#22c55e;font-weight:700;white-space:nowrap'>"
+                f"🟢 Add</span>"
+                f"<span style='flex:1'><b>{_tn['name']}</b> <span style='color:#888'>"
+                f"({_tn['asset_type']})</span></span>"
+                f"</div>"
+                f"<div style='font-size:.8rem;color:var(--text-color);"
+                f"margin:-2px 0 8px 14px'>{t['reason']}</div>",
+                unsafe_allow_html=True,
+            )
+
+        # --- unfunded adds (need new money) ---
+        for a in plan["adds"]:
+            st.markdown(
+                f"<div style='padding:10px 14px;border:1px dashed "
+                f"var(--secondary-background-color);border-radius:8px;margin-bottom:6px'>"
+                f"➕ <b>{a['name']}</b> ({a['asset_type']}) — "
+                f"{fmt_money(a['amount'])}<br/>"
+                f"<span style='font-size:.8rem;color:var(--text-color)'>"
+                f"{a['reason']}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+        for w in plan["warnings"]:
+            st.warning(w)
+
     # --------------------------------------------------------------- delete
     st.write("---")
     st.markdown("##### Manage holdings")

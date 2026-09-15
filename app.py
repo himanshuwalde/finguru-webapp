@@ -836,9 +836,11 @@ if (not st.session_state.logged_in
 # not the module the user left open last time. This correction runs before the
 # sidebar radio renders, so the landing page is what actually shows.
 _nav_kind = (_keeper or {}).get("navType")
-if (_nav_kind and _nav_kind not in ("reload", "back_forward")
+if (not st.session_state.get("_fresh_nav_corrected")
+        and _nav_kind and _nav_kind not in ("reload", "back_forward")
         and st.session_state.logged_in):
     st.session_state.sidebar_choice = _DEFAULT_PAGE
+    st.session_state["_fresh_nav_corrected"] = True
 
 def go_to_auth():
     st.session_state.show_auth_page = True
@@ -983,7 +985,7 @@ if st.session_state.logged_in:
     # ==========================================
     # ✨ THE PRIVACY GATEKEEPER
     # ==========================================
-    ai_powered_tools = ["🎯 Goals & Predictions", "🤖 AI CA Advisor"]
+    ai_powered_tools = ["🎯 Goals & Protection", "🤖 AI CA Advisor"]
 
     if choice in ai_powered_tools and not st.session_state.ai_consent:
         st.title("🛡️ AI Privacy & Consent")
@@ -1021,7 +1023,7 @@ if st.session_state.logged_in:
             w.render_page(supabase)
         elif choice == "🧾 Tax Planner":
             tax_planner.render_page(supabase)
-        elif choice == "🎯 Goals & Predictions":
+        elif choice == "🎯 Goals & Protection":
             import pages.goals as g
             g.render_page(supabase)
         elif choice == "👨‍👩‍👧 Family & Legacy":
@@ -1258,7 +1260,7 @@ else:
         ("📊", "Transactions & Budgeting", "Track every rupee, auto-catch anomalous and hidden spending, and know exactly how much is safe to spend.", ["Spend", "Alerts", "Budgets"]),
         ("📈", "Wealth", "Your portfolio, net worth and borrowing power — tracked and computed, not guessed.", ["Portfolio", "Net Worth", "Loans"]),
         ("🧾", "Tax Planning", "Old vs New regime compared side by side with your actual deductions, so you keep more of your income.", ["Old vs New", "Deductions", "Savings"]),
-        ("🎯", "Goals & Predictions", "Retirement probability via Monte Carlo, tailored insurance cover, and safety guardrails.", ["Retirement", "Insurance", "Protection"]),
+        ("🎯", "Goals & Protection", "Retirement probability via Monte Carlo, tailored insurance cover, and safety guardrails.", ["Retirement", "Insurance", "Protection"]),
         ("👨‍👩‍👧", "Family & Legacy", "A consolidated view across family, with asset-to-successor mapping for the next generation.", ["Family", "Legacy", "Inheritance"]),
         ("🤖", "AI CA Advisor", "A grounded advisor that answers from your computed figures — never from invented data.", ["Chat", "Grounded", "Anytime"]),
     ]

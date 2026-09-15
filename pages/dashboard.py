@@ -290,15 +290,41 @@ def render_page(supabase):
                 arrow = "↑" if pct >= 0 else "↓"
                 return f"{arrow} {abs(pct):.1f}% this month"
 
-            m1, m2, m3 = st.columns(3)
-            m1.metric("💰 Monthly Income", fmt_money(total_income, dp=2),
-                      delta=mom_str(total_income, prev_income),
-                      delta_color="normal")
+            # --- HEALTH SCORE + NET WORTH (from the same engine backing AI/chat) ---
+            _dash_hs = None
+            _dash_nw = None
+            try:
+                _dash_ctx = recommendation_service.build_financial_context(
+                    supabase, st.session_state.user_id)
+                _dash_hs = _dash_ctx.get("health_score")
+                _dash_nw = _dash_ctx.get("kpis", {}).get("net_worth")
+            except Exception:
+                pass
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+            if _dash_hs:
+                c1.metric("🤖 Health Score",
+                          f"{_dash_hs['overall']}/100",
+                          delta=_dash_hs.get("verb"),
+                          delta_color="normal")
+            else:
+                c1.metric("🤖 Health Score", "—", delta="unavailable")
+            c2.metric("🏦 Net Worth",
+                      fmt_money(_dash_nw) if _dash_nw is not None else "—")
+            with c3:
+                st.metric("💰 Monthly Income", fmt_money(total_income, dp=2),
+                          delta=mom_str(total_income, prev_income),
+                          delta_color="normal")
+                if st.button("📊 View Sources", key="view_income_sources",
+                             use_container_width=True,
+                             help="See this month's income sources and how diversified they are"):
+                    _income_sources_dialog(
+                        this_month_df[this_month_df["type"] == "Income"].copy())
             # Expense: spending up is bad → inverse colors so a rise shows red
-            m2.metric("💸 Monthly Expenses", fmt_money(total_expense, dp=2),
+            c4.metric("💸 Monthly Expenses", fmt_money(total_expense, dp=2),
                       delta=mom_str(total_expense, prev_expense),
                       delta_color="inverse")
-            m3.metric("🏦 Monthly Net", fmt_money(net_savings, dp=2),
+            c5.metric("🏦 Monthly Net", fmt_money(net_savings, dp=2),
                       delta=mom_str(net_savings, prev_net),
                       delta_color="normal")
 
@@ -689,6 +715,98 @@ def _predict_upcoming_bills(df, current_date, acc=None):
     return pd.DataFrame(upcoming)
 
 
+# ==========================================
+#  💰 INCOME SOURCES & DIVERSIFICATION (modal)
+# ==========================================
+@st.dialog("💰 Income Sources & Diversification", width="medium")
+def _income_sources_dialog(income_df):
+    """Modal pop-up behind the 'View Sources' button on the Monthly Income card.
+
+    Groups the selected account's income for the current month by source
+    (the decrypted transaction description — the payer). Concentration uses the
+    Herfindahl–Hirschman-style sum of squared % shares (10,000 = one source).
+    All deterministic figures, no AI, so it always matches the AI's grounding.
+    """
+    if income_df is None or income_df.empty:
+        st.info("No income logged for this month yet — add an Income transaction "
+                "to see your sources.")
+        return
+
+    # --- Group income by source (decrypted description) ---
+    by_source = {}
+    for _, row in income_df.iterrows():
+        raw = str(row.get("description") or "").strip()
+        dec = decrypt_data(raw)
+        name = dec.title() if dec and dec != "********" else (raw or "Untitled").title()
+        by_source[name] = by_source.get(name, 0.0) + float(row.get("amount") or 0.0)
+
+    rows = sorted(by_source.items(), key=lambda kv: -kv[1])
+    total = sum(v for _, v in rows) or 0.0
+    shares = [(n, a, a / total * 100 if total else 0.0) for n, a in rows]
+
+    # --- Diversification (HHI = sum of squared % shares; 10,000 = single source) ---
+    hhi = sum(s * s for _, _, s in shares)
+    n_sources = len(shares)
+    top_share = shares[0][2] if shares else 0.0
+    if n_sources <= 1 or hhi >= 6000:
+        diver_label, diver_color, diver_note = (
+            "Concentrated", "#e74c3c",
+            "Your income leans heavily on one source — losing it would hurt a lot.")
+    elif hhi >= 3000:
+        diver_label, diver_color, diver_note = (
+            "Moderately diversified", "#f1c40f",
+            "A few sources carry most of the load; adding more would lower the risk.")
+    else:
+        diver_label, diver_color, diver_note = (
+            "Well diversified", "#2ecc71",
+            "Income is spread across several sources — resilient if one dries up.")
+
+    # --- Header stats (plain HTML so long amounts wrap instead of truncating) ---
+    def _stat_chip(label, value, value_color=None):
+        vcolor = f"color:{value_color};" if value_color else ""
+        return (
+            f"<div style='background:var(--secondary-background-color);border:1px solid "
+            f"rgba(150,150,150,.1);border-radius:8px;padding:10px 14px'>"
+            f"<div style='font-size:.72rem;opacity:.55;text-transform:uppercase;"
+            f"letter-spacing:.6px'>{label}</div>"
+            f"<div style='font-size:1.3rem;font-weight:700;color:var(--text-color);"
+            f"overflow-wrap:anywhere;line-height:1.25;{vcolor}'>{value}</div></div>"
+        )
+
+    st.markdown(
+        "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));"
+        "gap:10px;margin-bottom:8px'>"
+        + _stat_chip("Total Income", fmt_money(total, dp=2))
+        + _stat_chip("Sources", str(n_sources))
+        + _stat_chip("Top Source", f"{top_share:.0f}% of income")
+        + _stat_chip("Diversification", diver_label, diver_color)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # --- Per-source breakdown with share bars (also the diversification visual) ---
+    for name, amt, pct in shares:
+        st.markdown(
+            f"<div style='display:flex;justify-content:space-between;align-items:baseline;"
+            f"gap:12px;font-size:.9rem;margin-top:2px'>"
+            f"<span style='color:var(--text-color);overflow-wrap:anywhere'>{name}</span>"
+            f"<span style='color:var(--text-color);white-space:nowrap;flex-shrink:0'>"
+            f"<b>{fmt_money(amt, dp=2)}</b> · <span style='opacity:.65'>{pct:.1f}%</span></span>"
+            f"</div>"
+            f"<div style='background:rgba(150,150,150,.18);border-radius:99px;height:5px;"
+            f"margin:3px 0 10px;overflow:hidden'>"
+            f"<div style='background:var(--primary-color);height:100%;width:{pct}%'></div></div>",
+            unsafe_allow_html=True)
+
+    # --- Diversification callout ---
+    st.markdown(
+        f"<div style='border-left:4px solid {diver_color};"
+        f"background:var(--secondary-background-color);padding:10px 14px;"
+        f"border-radius:6px;font-size:.88rem;color:var(--text-color);opacity:.9'>"
+        f"<b>Diversification · {diver_label}</b> — {diver_note}</div>",
+        unsafe_allow_html=True)
+
+
 def _render_finguru_insights(supabase, df, today):
     """Data-grounded FinGuru insights: combines the health-engine flags with a
     few deterministic, per-user observations. No invented numbers.
@@ -787,8 +905,9 @@ def _render_finguru_insights(supabase, df, today):
                 continue
             st.markdown(
                 f"<div style='display:flex;gap:10px;align-items:flex-start;"
-                f"padding:10px 12px;margin-bottom:6px;'>"
-                f"<div style='width:4px;border-radius:4px;background:{ins['color']};flex-shrink:0'></div>"
+                f"padding:8px 12px;'>"
+                f"<span style='color:{ins['color']};font-weight:700;font-size:1.05rem;"
+                f"line-height:1.5;flex-shrink:0'>•</span>"
                 f"<div style='font-size:.9rem;color:var(--text-color);line-height:1.55'>"
                 f"{ins['text']}</div></div>",
                 unsafe_allow_html=True)

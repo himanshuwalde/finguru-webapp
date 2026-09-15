@@ -13,8 +13,13 @@ import streamlit as st
 
 from engines import fire_engine
 from services.fire_service import get_fire_service
+from utils.ai_client import get_gemini_client, get_best_model, generate_content_safe
+from utils.ai_persona import persona_and_currency_note
 from utils.currency import fmt_input_label, fmt_label, fmt_money, symbol, to_inr
 from utils.ui_components import render_gradient_header, render_alert_banner
+
+# Future-self chat client (same pattern the old Financial Twin page used).
+genai_client = get_gemini_client()
 
 
 @st.dialog("Clear last result")
@@ -25,9 +30,99 @@ def confirm_clear_last_result():
     c1, c2 = st.columns(2)
     if c1.button("Yes, clear", type="primary", use_container_width=True):
         st.session_state.fire_result = None
+        st.session_state.pop("twin_context", None)
         st.rerun()
     if c2.button("Cancel", use_container_width=True):
         st.rerun()
+
+
+def _render_future_self_chat():
+    """💬 'Chat with your Future Self' — a Gemini persona grounded in the last
+    FIRE run (expected return + p5 / median / p95 corpus). This is the chat the
+    old Financial Twin page offered, now fed by the FIRE result instead of a
+    duplicate unseeded Monte Carlo."""
+    st.subheader("💬 Chat with your Future Self")
+    ctx = st.session_state.get("twin_context")
+    if not ctx:
+        st.info("Run the FIRE simulation first — your future self needs your "
+                "numbers to answer.")
+        return
+
+    st.markdown(
+        f"Ask how a purchase today impacts your timeline (e.g., *'What happens "
+        f"if I buy a {fmt_money(2000000)} car today instead of investing it?'*)")
+
+    if "twin_messages" not in st.session_state:
+        st.session_state.twin_messages = []
+
+    for msg in st.session_state.twin_messages:
+        with st.chat_message(msg["role"],
+                             avatar="🧑‍🎓" if msg["role"] == "assistant" else "👤"):
+            st.markdown(msg["content"])
+
+    if prompt := st.chat_input("Ask your future self a question..."):
+        st.chat_message("user", avatar="👤").markdown(prompt)
+        st.session_state.twin_messages.append({"role": "user", "content": prompt})
+
+        with st.chat_message("assistant", avatar="🧑‍🎓"):
+            message_placeholder = st.empty()
+            with st.spinner("Your future self is calculating..."):
+                try:
+                    target_model = get_best_model(genai_client, prefer_flash=True)
+                    model = genai_client.GenerativeModel(target_model)
+
+                    chat_history_str = "\n".join(
+                        f"{msg['role'].upper()}: {msg['content']}"
+                        for msg in st.session_state.twin_messages)
+
+                    persona_cur = persona_and_currency_note()
+                    system_prompt = f"""
+                    {persona_cur}
+
+                    You are the user's "Financial Twin"—their future self at age {ctx['age']}. User's Current age: {ctx['AGE']}.
+                    Current expected retirement net worth: {fmt_money(ctx['median'])}
+                    (Range: {fmt_money(ctx['worst_case'])} to {fmt_money(ctx['best_case'])}).
+                    The user's actual current portfolio growth rate is {ctx['portfolio_return']}%.
+
+                    Read the chat history to determine which phase you are in:
+
+                    PHASE 1: THE WISDOM (Initial Response to a purchase idea)
+                    - Speak in the first person ("I am you from the future...").
+                    - Use very easy, simple, and understandable language. No complex financial jargon.
+                    - Perform a "Time-Travel Cost Analysis" using their ACTUAL {ctx['portfolio_return']}% return rate to show exactly how much that money would have grown to by age {ctx['age']} if invested.
+                    - Be empathetic but slightly dramatic about the "Opportunity Cost" (e.g., fleeting pleasure vs. a secure retirement).
+                    - ALWAYS end Phase 1 by asking this exact question: "Anyhow, would you like me to guide you on how to buy this today with maximum benefits?"
+
+                    PHASE 2: DAMAGE CONTROL (If the User says Yes/Agrees to be guided)
+                    - Drop the dramatic act. Shift your tone to a highly supportive, savvy "Financial Strategist."
+                    - Provide a step-by-step guide in simple language on how to buy the item smartly in the Indian market:
+                      1. Mention using specific credit cards for high cashback or reward milestones.
+                      2. Explain the "Arbitrage" concept simply: Compare typical loan interest rates (e.g., 8-9%) against their actual {ctx['portfolio_return']}% portfolio return. Explain why taking a loan might actually be smarter than paying cash if their investments grow faster than the loan interest.
+                      3. Suggest timing the purchase (e.g., waiting for Diwali, year-end sales, or festive discounts).
+                      4. Mention basic tax benefits if applicable.
+
+                    Maintain a wise, protective, and easy-to-understand tone at all times.
+
+                    --- CHAT HISTORY ---
+                    {chat_history_str}
+                    """
+
+                    response_text = generate_content_safe(model, system_prompt)
+                    if response_text:
+                        message_placeholder.markdown(response_text)
+                        st.session_state.twin_messages.append(
+                            {"role": "assistant", "content": response_text})
+                    else:
+                        raise Exception("Empty response from model")
+
+                except Exception as e:
+                    error_str = str(e)
+                    if "429" in error_str or "Quota exceeded" in error_str:
+                        st.error("⏳ **Traffic Jam!** Our AI is currently handling "
+                                 "too many requests. Please wait 30 seconds and "
+                                 "try again.")
+                    else:
+                        st.error(f"❌ **System Error:** {error_str}")
 
 
 def render_page(supabase):
@@ -91,6 +186,16 @@ def render_page(supabase):
         result = svc.run_and_save(user_id, payload, seed=42)  # reproducible demos
         if result:
             st.session_state.fire_result = result
+            # Ground the "Future Self" chat on this run — the old Financial Twin
+            # re-simulated the same numbers; now it just re-reads the FIRE result.
+            st.session_state.twin_context = {
+                "age": target_age,
+                "AGE": cur_age,
+                "worst_case": result.get("p5_corpus") or 0.0,
+                "median": result.get("median_corpus") or 0.0,
+                "best_case": result.get("p95_corpus") or 0.0,
+                "portfolio_return": ret,
+            }
             st.rerun()
         else:
             st.warning("Couldn't run — did you run migrations/001 in Supabase? "
@@ -113,6 +218,8 @@ def render_page(supabase):
                       "P(FIRE)": f"{h['probability_pct']:.0f}%",
                       "Run at": h["created_at"][:10]} for h in history]
             st.dataframe(pd.DataFrame(hrows), use_container_width=True, hide_index=True)
+        st.write("---")
+        _render_future_self_chat()
         return
 
     # ------------------------------------------------------------- results
@@ -185,3 +292,7 @@ def render_page(supabase):
                   "p5–p95": f"{fmt_money(h['p5'])} – {fmt_money(h['p95'])}",
                   "Run at": h["created_at"][:10]} for h in history]
         st.dataframe(pd.DataFrame(hrows), use_container_width=True, hide_index=True)
+
+    # ------------------------------------------------------ future self chat
+    st.write("---")
+    _render_future_self_chat()
